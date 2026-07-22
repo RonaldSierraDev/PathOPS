@@ -1,0 +1,49 @@
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.python-version
+
+# Env / secrets
+.env
+.env.*
+*.pem
+
+# Data & model artifacts (fetched/generated, not versioned in git)
+data/*
+!data/.gitkeep
+!data/README.md
+*.h5
+*.pt
+*.pth
+*.ckpt
+
+# Experiment tracking
+mlruns/
+mlartifacts/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
+
+# Docker
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
