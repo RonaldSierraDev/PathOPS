@@ -8,7 +8,18 @@ Full design doc, week-by-week plan, and the longer-term Phase 2 vision (an ontol
 
 ## Status
 
-Groundwork stage — repo structure is in place; dataset download and the first training/inference pass haven't started yet.
+First trained baseline is in. Data pipeline, model, training loop, evaluation, threshold selection, and inference API are all wired up and tested end-to-end on real data — Dockerizing and deploying it is the remaining Week 1 work.
+
+**First baseline (ResNet18, 5 epochs, ImageNet-pretrained, no augmentation) on held-out test:**
+
+| Metric | Value |
+|---|---|
+| AUC | 0.935 |
+| Accuracy (at 0.5 threshold) | 76.5% |
+| Sensitivity (at selected threshold) | 95.3% |
+| Specificity (at that threshold) | 57.6% |
+
+The operating threshold is chosen on the valid split to guarantee ≥95% sensitivity (missing a tumor is far costlier than a false alarm here — see the design doc). At that sensitivity, specificity is 57.6%, i.e. over 40% of non-tumor patches are false alarms. That's an honest baseline number, not a tuned final result — no augmentation, LR scheduling, or calibration has been applied yet.
 
 ## Stack
 
