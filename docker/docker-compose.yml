@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pathml-postgres
+    environment:
+      POSTGRES_USER: pathml
+      POSTGRES_PASSWORD: pathml
+      POSTGRES_DB: pathml
+    ports:
+      - "5432:5432"
+    volumes:
+      - pathml-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  pathml-postgres-data:

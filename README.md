@@ -44,6 +44,7 @@ The operating threshold is chosen on the valid split to guarantee ≥95% sensiti
 │   ├── models/           # model definitions
 │   ├── training/         # training scripts, config
 │   ├── api/              # FastAPI inference service
+│   ├── db/               # Postgres schema (predictions, model_versions, feedback)
 │   └── monitoring/       # drift detection, logging
 ├── tests/
 ├── notebooks/            # exploration, EDA
