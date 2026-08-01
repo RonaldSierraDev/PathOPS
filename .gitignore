@@ -29,6 +29,7 @@ data/*
 # Experiment tracking
 mlruns/
 mlartifacts/
+mlflow.db
 
 # Terraform
 .terraform/

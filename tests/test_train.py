@@ -1,10 +1,12 @@
 from pathlib import Path
 
 import h5py
+import mlflow
 import numpy as np
+from mlflow import MlflowClient
 
 from pathml.data.dataset import SPLIT_FILES
-from pathml.training.train import train
+from pathml.training.train import REGISTERED_MODEL_NAME, train
 
 
 def _write_split(tmp_path: Path, split: str, n: int) -> None:
@@ -22,6 +24,7 @@ def test_train_runs_and_saves_checkpoint(tmp_path):
     _write_split(tmp_path, "train", n=8)
     _write_split(tmp_path, "valid", n=4)
     out_path = tmp_path / "checkpoint.pt"
+    tracking_uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
 
     train(
         data_dir=tmp_path,
@@ -31,6 +34,11 @@ def test_train_runs_and_saves_checkpoint(tmp_path):
         model_name="resnet18",
         out_path=out_path,
         pretrained=False,
+        tracking_uri=tracking_uri,
     )
 
     assert out_path.exists()
+
+    mlflow.set_tracking_uri(tracking_uri)
+    latest = MlflowClient().get_model_version_by_alias(REGISTERED_MODEL_NAME, "staging")
+    assert latest is not None
