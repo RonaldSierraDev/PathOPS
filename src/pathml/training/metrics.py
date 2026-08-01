@@ -4,6 +4,7 @@ Accuracy alone is a poor signal for a screening task like this one: a false
 negative (a missed tumor) is far costlier than a false positive, so AUC plus
 threshold-dependent sensitivity/specificity matter more than raw accuracy.
 """
+import math
 from dataclasses import dataclass
 
 import torch
@@ -111,14 +112,18 @@ def select_threshold(scores: torch.Tensor, labels: torch.Tensor, min_sensitivity
     Raising the threshold monotonically trades sensitivity for specificity, so
     the highest threshold still meeting the floor is also the most specific
     one that meets it.
+
+    Sensitivity depends only on the positive-class scores: guaranteeing at
+    least `k = ceil(min_sensitivity * n_pos)` positives score at or above the
+    threshold means the threshold is exactly the k-th highest positive score
+    -- no need to scan every candidate against the full label set (O(n) per
+    candidate), which is what made the naive sweep over ~30K thresholds hang.
     """
-    candidates = torch.unique(scores)
-    candidates = torch.cat([candidates, torch.tensor([0.0])]).sort().values
+    pos_scores = scores[labels == 1]
+    n_pos = len(pos_scores)
+    if n_pos == 0:
+        return 0.0
 
-    best = 0.0
-    for threshold in candidates.tolist():
-        m = metrics_at_threshold(scores, labels, threshold)
-        if m.sensitivity >= min_sensitivity:
-            best = threshold
-
-    return best
+    k = min(max(math.ceil(min_sensitivity * n_pos), 1), n_pos)
+    sorted_desc, _ = torch.sort(pos_scores, descending=True)
+    return sorted_desc[k - 1].item()
