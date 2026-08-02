@@ -92,6 +92,22 @@ data "aws_iam_policy_document" "drift_monitor" {
   }
 
   statement {
+    # GetObject alone isn't enough: without ListBucket, S3 can't tell the
+    # caller whether a missing key is "doesn't exist" vs "you can't see it",
+    # so it returns an opaque AccessDenied instead of NoSuchKey for missing
+    # objects -- which breaks the per-image try/except in _load_recent_features.
+    # Scoped to just the prefixes this Lambda reads, via the s3:prefix condition.
+    sid       = "ListBucketForMissingKeyDetection"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.artifacts.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["monitoring/baseline.csv", "predictions/*"]
+    }
+  }
+
+  statement {
     sid       = "WriteDriftReports"
     actions   = ["s3:PutObject"]
     resources = ["${aws_s3_bucket.artifacts.arn}/monitoring/reports/*"]
