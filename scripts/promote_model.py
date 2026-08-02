@@ -8,11 +8,18 @@ scripts/evaluate.py against it, and only re-aliases it to `production` (in
 both the MLflow registry and the Postgres model_versions audit table) if it
 clears the AUC and sensitivity gates. Otherwise it exits nonzero and leaves
 the registry untouched.
+
+If --s3-uri is given, also uploads the promoted checkpoint's state_dict to
+that fixed S3 key, overwriting whatever was there -- this is the file the
+deployed inference API downloads on startup (see MODEL_S3_URI in
+pathml.api.main), so promoting a model here is what ships it.
 """
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
+import boto3
 import mlflow
 import torch
 from mlflow import MlflowClient
@@ -34,6 +41,9 @@ def main() -> None:
                          help="minimum test AUC required to promote to production")
     parser.add_argument("--tracking-uri", default=DEFAULT_TRACKING_URI)
     parser.add_argument("--dsn", default=DEFAULT_DSN, help="Postgres DSN for the model_versions audit table")
+    parser.add_argument("--s3-uri", default=None,
+                         help="e.g. s3://bucket/models/pcam_resnet18.pt -- if set, uploads the promoted "
+                              "checkpoint here after the gate passes, for the API to pick up")
     args = parser.parse_args()
 
     mlflow.set_tracking_uri(args.tracking_uri)
@@ -71,6 +81,13 @@ def main() -> None:
     )
     print(f"promoted {args.model_name} v{version_info.version} to production "
           f"(MLflow registry + Postgres model_versions)")
+
+    if args.s3_uri:
+        bucket, _, key = args.s3_uri.removeprefix("s3://").partition("/")
+        with tempfile.NamedTemporaryFile(suffix=".pt") as tmp:
+            torch.save(model.state_dict(), tmp.name)
+            boto3.client("s3").upload_file(tmp.name, bucket, key)
+        print(f"uploaded checkpoint to {args.s3_uri}")
 
 
 if __name__ == "__main__":
