@@ -76,13 +76,19 @@ data "aws_iam_policy_document" "github_actions_deploy" {
       "ecr:UploadLayerPart",
       "ecr:CompleteLayerUpload",
     ]
-    resources = [aws_ecr_repository.api.arn]
+    resources = [aws_ecr_repository.api.arn, aws_ecr_repository.drift_monitor.arn]
   }
 
   statement {
     sid       = "ECSRedeploy"
     actions   = ["ecs:UpdateService", "ecs:DescribeServices"]
     resources = [aws_ecs_service.api.id]
+  }
+
+  statement {
+    sid       = "LambdaRedeploy"
+    actions   = ["lambda:UpdateFunctionCode", "lambda:GetFunction"]
+    resources = [aws_lambda_function.drift_monitor.arn]
   }
 }
 

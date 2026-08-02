@@ -1,0 +1,21 @@
+# Deliberately NOT `pip install pathml` from pyproject.toml -- that would
+# pull in torch/torchvision/timm/fastapi/mlflow, none of which the drift
+# monitor touches, just to get evidently/pandas/boto3/httpx/Pillow. Instead
+# copy only the two submodules this Lambda actually imports and install
+# their real dependencies directly, keeping the image lean.
+FROM public.ecr.aws/lambda/python:3.12
+
+RUN pip install --no-cache-dir \
+    boto3 \
+    httpx \
+    pandas \
+    evidently \
+    pillow \
+    numpy \
+    psycopg2-binary
+
+COPY src/pathml/__init__.py ${LAMBDA_TASK_ROOT}/pathml/__init__.py
+COPY src/pathml/db/ ${LAMBDA_TASK_ROOT}/pathml/db/
+COPY src/pathml/monitoring/ ${LAMBDA_TASK_ROOT}/pathml/monitoring/
+
+CMD ["pathml.monitoring.lambda_handler.handler"]

@@ -170,6 +170,12 @@ def test_export_feedback_without_database_url_returns_503(monkeypatch):
     assert response.status_code == 503
 
 
+def test_recent_predictions_without_database_url_returns_503(monkeypatch):
+    monkeypatch.setattr(api_main, "DATABASE_URL", None)
+    response = client.get("/predictions/recent")
+    assert response.status_code == 503
+
+
 @pytest.mark.skipif(not _postgres_available(), reason="local Postgres not running (docker compose -f docker/docker-compose.yml up -d)")
 class TestFeedbackAgainstRealPostgres:
     def setup_method(self):
@@ -205,6 +211,16 @@ class TestFeedbackAgainstRealPostgres:
             cur.execute("SELECT input_hash FROM predictions WHERE id = %s", (prediction_id,))
             input_hash = cur.fetchone()[0]
         assert {"input_hash": input_hash, "corrected_label": "no_tumor"} in export_response.json()
+
+        # Uses the same fixed test image every run, so the shared local Postgres
+        # instance may carry multiple rows for this input_hash across test runs --
+        # assert at least one matches, not exactly one.
+        recent_response = client.get("/predictions/recent")
+        assert recent_response.status_code == 200
+        matches = [row for row in recent_response.json() if row["input_hash"] == input_hash]
+        assert len(matches) >= 1
+        assert matches[0]["predicted_label"] == predict_response.json()["label"]
+        assert matches[0]["confidence"] == pytest.approx(predict_response.json()["confidence"])
 
     def test_feedback_for_unknown_prediction_returns_404(self, monkeypatch):
         monkeypatch.setattr(api_main, "DATABASE_URL", DEFAULT_DSN)

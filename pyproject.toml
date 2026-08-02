@@ -28,6 +28,14 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.16",
 ]
+# Kept out of the base install: evidently pulls in pandas/scipy/plotly/nltk,
+# which would undo the effort put into keeping the ECS API image small.
+# Only the drift-monitor Lambda (docker/Dockerfile.drift-monitor) and the
+# baseline-computation script need this.
+monitoring = [
+    "evidently>=0.7",
+    "pandas>=2.0",
+]
 
 [build-system]
 requires = ["hatchling"]

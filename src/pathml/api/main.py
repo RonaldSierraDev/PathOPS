@@ -177,3 +177,36 @@ def export_feedback() -> list[dict]:
         rows = cur.fetchall()
 
     return [{"input_hash": input_hash, "corrected_label": corrected_label} for input_hash, corrected_label in rows]
+
+
+@app.get("/predictions/recent")
+def recent_predictions(limit: int = 200) -> list[dict]:
+    """The most recent predictions, for the drift-monitor Lambda to sample live traffic.
+
+    Same reasoning as /feedback/export: the Lambda runs outside the VPC (to
+    avoid a NAT gateway/VPC endpoints just to reach CloudWatch/SNS), so it
+    reads over plain HTTPS instead of connecting to RDS directly. Reveals
+    labels/confidence/hash only, not the images themselves -- same exposure
+    level as the other unauthenticated endpoints.
+    """
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="requires DATABASE_URL to be configured")
+
+    limit = min(limit, 1000)
+    with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT input_hash, predicted_label, confidence, created_at FROM predictions "
+            "ORDER BY created_at DESC LIMIT %s",
+            (limit,),
+        )
+        rows = cur.fetchall()
+
+    return [
+        {
+            "input_hash": input_hash,
+            "predicted_label": predicted_label,
+            "confidence": confidence,
+            "created_at": created_at.isoformat(),
+        }
+        for input_hash, predicted_label, confidence, created_at in rows
+    ]
