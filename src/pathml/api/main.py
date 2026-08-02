@@ -199,7 +199,7 @@ def recent_predictions(limit: int = 200) -> list[dict]:
     limit = min(limit, 1000)
     with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT input_hash, predicted_label, confidence, created_at FROM predictions "
+            "SELECT input_hash, predicted_label, confidence, latency_ms, created_at FROM predictions "
             "ORDER BY created_at DESC LIMIT %s",
             (limit,),
         )
@@ -210,7 +210,8 @@ def recent_predictions(limit: int = 200) -> list[dict]:
             "input_hash": input_hash,
             "predicted_label": predicted_label,
             "confidence": confidence,
+            "latency_ms": latency_ms,
             "created_at": created_at.isoformat(),
         }
-        for input_hash, predicted_label, confidence, created_at in rows
+        for input_hash, predicted_label, confidence, latency_ms, created_at in rows
     ]
