@@ -47,3 +47,25 @@ def init_schema(dsn: str = DEFAULT_DSN) -> None:
     with psycopg2.connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(SCHEMA_SQL)
         conn.commit()
+
+
+UPSERT_MODEL_VERSION_SQL = """
+INSERT INTO model_versions (model_name, version, alias, mlflow_run_id)
+VALUES (%s, %s, %s, %s)
+ON CONFLICT (model_name, version)
+DO UPDATE SET alias = EXCLUDED.alias, mlflow_run_id = EXCLUDED.mlflow_run_id
+"""
+
+
+def record_model_version(
+    dsn: str, model_name: str, version: int, alias: str, mlflow_run_id: str
+) -> None:
+    """Record (or update) a model registry version's alias, e.g. after promoting it to 'production'.
+
+    Upserts on (model_name, version), the table's unique key, so calling this
+    again for the same version -- e.g. re-promoting or re-staging it -- just
+    updates the alias rather than erroring or duplicating the row.
+    """
+    with psycopg2.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(UPSERT_MODEL_VERSION_SQL, (model_name, version, alias, mlflow_run_id))
+        conn.commit()

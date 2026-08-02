@@ -70,6 +70,39 @@ def roc_auc(scores: torch.Tensor, labels: torch.Tensor) -> float:
     return ((rank_sum_pos - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)).item()
 
 
+def precision_recall_curve(scores: torch.Tensor, labels: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Precision/recall at every distinct score threshold -- no sklearn.
+
+    Sorts scores descending and sweeps cumulative true/false positive counts,
+    O(n log n), in the same style as roc_auc/select_threshold. Ties are
+    collapsed to one point per distinct threshold (the last index in a tie
+    group), matching sklearn's convention. Returns arrays ordered from the
+    highest threshold (lowest recall) to the lowest (highest recall).
+    """
+    n_pos = int((labels == 1).sum())
+    if n_pos == 0:
+        empty = torch.empty(0)
+        return empty, empty, empty
+
+    order = torch.argsort(scores, descending=True)
+    sorted_scores = scores[order]
+    sorted_labels = labels[order]
+
+    tps = torch.cumsum((sorted_labels == 1).long(), dim=0)
+    fps = torch.cumsum((sorted_labels == 0).long(), dim=0)
+
+    is_last_in_tie = torch.ones(len(sorted_scores), dtype=torch.bool)
+    is_last_in_tie[:-1] = sorted_scores[:-1] != sorted_scores[1:]
+
+    tps = tps[is_last_in_tie].double()
+    fps = fps[is_last_in_tie].double()
+    thresholds = sorted_scores[is_last_in_tie]
+
+    precision = tps / (tps + fps)
+    recall = tps / n_pos
+    return thresholds, precision, recall
+
+
 def scores_and_labels(model: torch.nn.Module, loader: DataLoader, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
     """Run inference over a loader once, returning tumor-class probabilities and true labels."""
     model.eval()
@@ -80,6 +113,22 @@ def scores_and_labels(model: torch.nn.Module, loader: DataLoader, device: torch.
             all_scores.append(probs.cpu())
             all_labels.append(labels)
     return torch.cat(all_scores), torch.cat(all_labels)
+
+
+def logits_and_labels(model: torch.nn.Module, loader: DataLoader, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run inference over a loader once, returning raw 2-class logits and true labels.
+
+    Unlike scores_and_labels, this skips the softmax so callers can fit a
+    temperature-scaling calibrator (which operates on logits, not probabilities).
+    """
+    model.eval()
+    all_logits, all_labels = [], []
+    with torch.no_grad():
+        for images, labels in loader:
+            logits = model(images.to(device))
+            all_logits.append(logits.cpu())
+            all_labels.append(labels)
+    return torch.cat(all_logits), torch.cat(all_labels)
 
 
 def metrics_at_threshold(scores: torch.Tensor, labels: torch.Tensor, threshold: float) -> Metrics:
