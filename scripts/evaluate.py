@@ -39,7 +39,7 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = build_classifier(args.model_name, pretrained=False)
-    model.load_state_dict(torch.load(checkpoint, map_location=device))
+    model.load_state_dict(torch.load(checkpoint, map_location=device, weights_only=True))
 
     result = evaluate_checkpoint(
         model, data_dir, batch_size=args.batch_size, min_sensitivity=args.min_sensitivity, device=device,

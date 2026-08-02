@@ -54,15 +54,22 @@ jobs:
           echo "url=http://$PUBLIC_IP:8000/feedback/export" >> "$GITHUB_OUTPUT"
 
       - name: Retrain, blending in feedback corrections
+        env:
+          EPOCHS: ${{ inputs.epochs }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          LR: ${{ inputs.lr }}
+          TRACKING_URI: ${{ inputs.tracking_uri }}
+          FEEDBACK_EXPORT_URL: ${{ steps.api.outputs.url }}
+          FEEDBACK_IMAGES_S3_BUCKET: ${{ vars.S3_ARTIFACTS_BUCKET }}
         run: |
           python -m pathml.training.train \
             --data-dir data/pcam \
-            --epochs "${{ inputs.epochs }}" \
-            --batch-size "${{ inputs.batch_size }}" \
-            --lr "${{ inputs.lr }}" \
-            --tracking-uri "${{ inputs.tracking_uri }}" \
-            --feedback-export-url "${{ steps.api.outputs.url }}" \
-            --feedback-images-s3-bucket "${{ vars.S3_ARTIFACTS_BUCKET }}"
+            --epochs "$EPOCHS" \
+            --batch-size "$BATCH_SIZE" \
+            --lr "$LR" \
+            --tracking-uri "$TRACKING_URI" \
+            --feedback-export-url "$FEEDBACK_EXPORT_URL" \
+            --feedback-images-s3-bucket "$FEEDBACK_IMAGES_S3_BUCKET"
 
       - name: Next step (manual)
         run: |

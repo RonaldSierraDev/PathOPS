@@ -144,6 +144,9 @@ class _FakeConnection:
     def commit(self):
         pass
 
+    def close(self):
+        pass
+
     def __enter__(self):
         return self
 

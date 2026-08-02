@@ -10,7 +10,7 @@ import numpy as np
 import psycopg2
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel
 
 from pathml.db.schema import (
@@ -25,6 +25,7 @@ app = FastAPI(title="PathML Inference API")
 
 CHECKPOINT_PATH = Path("models/pcam_resnet18.pt")
 MODEL_NAME = "resnet18"
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # generous headroom over a 96x96 patch; guards against unbounded reads
 
 # All optional so local dev/tests need no S3 or Postgres: unset MODEL_S3_URI keeps
 # the checkpoint local, unset DATABASE_URL skips prediction logging entirely, and
@@ -54,7 +55,7 @@ def _load_model() -> torch.nn.Module:
         if not CHECKPOINT_PATH.exists():
             raise HTTPException(status_code=503, detail=f"no checkpoint found at {CHECKPOINT_PATH}")
         model = build_classifier(MODEL_NAME, pretrained=False)
-        model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=_device))
+        model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=_device, weights_only=True))
         _model = model.to(_device).eval()
     return _model
 
@@ -64,25 +65,33 @@ def _get_model_version_id() -> int:
     if _model_version_id is None:
         init_schema(DATABASE_URL)
         record_model_version(DATABASE_URL, MODEL_NAME, MODEL_VERSION, "production", os.environ.get("MLFLOW_RUN_ID", ""))
-        with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM model_versions WHERE model_name = %s AND version = %s",
-                (MODEL_NAME, MODEL_VERSION),
-            )
-            _model_version_id = cur.fetchone()[0]
+        conn = psycopg2.connect(DATABASE_URL)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM model_versions WHERE model_name = %s AND version = %s",
+                    (MODEL_NAME, MODEL_VERSION),
+                )
+                _model_version_id = cur.fetchone()[0]
+        finally:
+            conn.close()
     return _model_version_id
 
 
 def _log_prediction(input_bytes: bytes, label: str, confidence: float, latency_ms: float) -> int:
     input_hash = hashlib.sha256(input_bytes).hexdigest()
-    with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO predictions (model_version_id, input_hash, predicted_label, confidence, latency_ms) "
-            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (_get_model_version_id(), input_hash, label, confidence, latency_ms),
-        )
-        prediction_id = cur.fetchone()[0]
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO predictions (model_version_id, input_hash, predicted_label, confidence, latency_ms) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (_get_model_version_id(), input_hash, label, confidence, latency_ms),
+            )
+            prediction_id = cur.fetchone()[0]
         conn.commit()
+    finally:
+        conn.close()
 
     # Predictions are only content-addressed by hash in Postgres -- without also
     # keeping the actual bytes somewhere, a later correction has no image for
@@ -114,10 +123,16 @@ async def predict(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=400, detail="file must be an image")
 
     model = _load_model()
-    raw_bytes = await file.read()
+    raw_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(raw_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"file must be at most {MAX_UPLOAD_BYTES} bytes")
 
     start = time.perf_counter()
-    image = Image.open(io.BytesIO(raw_bytes))
+    try:
+        image = Image.open(io.BytesIO(raw_bytes))
+        image.load()
+    except (UnidentifiedImageError, OSError):
+        raise HTTPException(status_code=400, detail="file is not a valid image")
     tensor = _preprocess(image).to(_device)
 
     with torch.no_grad():
@@ -147,16 +162,19 @@ def submit_feedback(feedback: FeedbackRequest) -> dict:
     if feedback.corrected_label not in LABELS:
         raise HTTPException(status_code=400, detail=f"corrected_label must be one of {LABELS}")
 
+    conn = psycopg2.connect(DATABASE_URL)
     try:
-        with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+        with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO feedback (prediction_id, corrected_label, note) VALUES (%s, %s, %s) RETURNING id",
                 (feedback.prediction_id, feedback.corrected_label, feedback.note),
             )
             feedback_id = cur.fetchone()[0]
-            conn.commit()
+        conn.commit()
     except psycopg2.errors.ForeignKeyViolation:
         raise HTTPException(status_code=404, detail=f"no prediction with id {feedback.prediction_id}")
+    finally:
+        conn.close()
 
     return {"feedback_id": feedback_id}
 
@@ -165,7 +183,7 @@ def submit_feedback(feedback: FeedbackRequest) -> dict:
 def export_feedback() -> list[dict]:
     """Corrections available for retraining, as (input_hash, corrected_label) pairs.
 
-    Exists so retraining can pull feedback over plain HTTPS from wherever it
+    Exists so retraining can pull feedback over plain HTTP from wherever it
     actually runs (e.g. a self-hosted runner on a contributor's own machine)
     without needing a network path into RDS, which is deliberately not
     reachable from outside the VPC. Not authenticated, same as /predict and
@@ -174,11 +192,15 @@ def export_feedback() -> list[dict]:
     if not DATABASE_URL:
         raise HTTPException(status_code=503, detail="feedback export requires DATABASE_URL to be configured")
 
-    with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT p.input_hash, f.corrected_label FROM feedback f JOIN predictions p ON p.id = f.prediction_id"
-        )
-        rows = cur.fetchall()
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT p.input_hash, f.corrected_label FROM feedback f JOIN predictions p ON p.id = f.prediction_id"
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
 
     return [{"input_hash": input_hash, "corrected_label": corrected_label} for input_hash, corrected_label in rows]
 
@@ -189,21 +211,25 @@ def recent_predictions(limit: int = 200) -> list[dict]:
 
     Same reasoning as /feedback/export: the Lambda runs outside the VPC (to
     avoid a NAT gateway/VPC endpoints just to reach CloudWatch/SNS), so it
-    reads over plain HTTPS instead of connecting to RDS directly. Reveals
+    reads over plain HTTP instead of connecting to RDS directly. Reveals
     labels/confidence/hash only, not the images themselves -- same exposure
     level as the other unauthenticated endpoints.
     """
     if not DATABASE_URL:
         raise HTTPException(status_code=503, detail="requires DATABASE_URL to be configured")
 
-    limit = min(limit, 1000)
-    with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT input_hash, predicted_label, confidence, latency_ms, created_at FROM predictions "
-            "ORDER BY created_at DESC LIMIT %s",
-            (limit,),
-        )
-        rows = cur.fetchall()
+    limit = max(1, min(limit, 1000))
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT input_hash, predicted_label, confidence, latency_ms, created_at FROM predictions "
+                "ORDER BY created_at DESC LIMIT %s",
+                (limit,),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
 
     return [
         {

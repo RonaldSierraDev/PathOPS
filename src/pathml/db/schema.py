@@ -60,9 +60,13 @@ CREATE INDEX IF NOT EXISTS idx_feedback_prediction ON feedback(prediction_id);
 
 def init_schema(dsn: str = DEFAULT_DSN) -> None:
     """Create the schema if it doesn't already exist. Safe to call repeatedly."""
-    with psycopg2.connect(dsn) as conn, conn.cursor() as cur:
-        cur.execute(SCHEMA_SQL)
+    conn = psycopg2.connect(dsn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA_SQL)
         conn.commit()
+    finally:
+        conn.close()
 
 
 UPSERT_MODEL_VERSION_SQL = """
@@ -82,6 +86,10 @@ def record_model_version(
     again for the same version -- e.g. re-promoting or re-staging it -- just
     updates the alias rather than erroring or duplicating the row.
     """
-    with psycopg2.connect(dsn) as conn, conn.cursor() as cur:
-        cur.execute(UPSERT_MODEL_VERSION_SQL, (model_name, version, alias, mlflow_run_id))
+    conn = psycopg2.connect(dsn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(UPSERT_MODEL_VERSION_SQL, (model_name, version, alias, mlflow_run_id))
         conn.commit()
+    finally:
+        conn.close()

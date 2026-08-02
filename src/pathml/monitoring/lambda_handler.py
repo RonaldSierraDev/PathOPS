@@ -3,9 +3,11 @@
 Runs outside the VPC entirely (see the module docstring in
 pathml.training.feedback for why): it resolves the inference API's current
 public IP itself (there's no ALB/stable DNS, a deliberate cost tradeoff --
-see terraform/ecs.tf) and pulls recent traffic over plain HTTPS from
+see terraform/ecs.tf) and pulls recent traffic over plain HTTP from
 /predictions/recent, rather than connecting to the private RDS instance or
-needing a NAT gateway/VPC endpoints just to reach CloudWatch/SNS.
+needing a NAT gateway/VPC endpoints just to reach CloudWatch/SNS. There's no
+TLS termination in front of the API, so this traffic is unencrypted -- same
+exposure as the API's other unauthenticated endpoints.
 """
 import io
 import os
@@ -29,17 +31,27 @@ CLOUDWATCH_NAMESPACE = os.environ.get("CLOUDWATCH_NAMESPACE", "PathML/Monitoring
 
 
 def _resolve_api_base_url() -> str | None:
+    """Resolve the running API task's public IP, or None if it can't be found right now.
+
+    A task can be mid-deploy or mid-provisioning when this runs (autoscaling,
+    a CD rollout in progress) -- ECS/EC2 briefly return empty attachments or
+    an ENI with no public IP assigned yet. Treat that the same as "no running
+    task": skip this check rather than crashing the scheduled Lambda.
+    """
     ecs = boto3.client("ecs")
     task_arns = ecs.list_tasks(cluster=ECS_CLUSTER, serviceName=ECS_SERVICE).get("taskArns", [])
     if not task_arns:
         return None
 
-    task = ecs.describe_tasks(cluster=ECS_CLUSTER, tasks=task_arns[:1])["tasks"][0]
-    eni_id = next(
-        d["value"] for d in task["attachments"][0]["details"] if d["name"] == "networkInterfaceId"
-    )
-    eni = boto3.client("ec2").describe_network_interfaces(NetworkInterfaceIds=[eni_id])
-    public_ip = eni["NetworkInterfaces"][0]["Association"]["PublicIp"]
+    try:
+        task = ecs.describe_tasks(cluster=ECS_CLUSTER, tasks=task_arns[:1])["tasks"][0]
+        eni_id = next(
+            d["value"] for d in task["attachments"][0]["details"] if d["name"] == "networkInterfaceId"
+        )
+        eni = boto3.client("ec2").describe_network_interfaces(NetworkInterfaceIds=[eni_id])
+        public_ip = eni["NetworkInterfaces"][0]["Association"]["PublicIp"]
+    except (IndexError, KeyError, StopIteration):
+        return None
     return f"http://{public_ip}:8000"
 
 

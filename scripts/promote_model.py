@@ -74,6 +74,17 @@ def main() -> None:
             print(f"  - {reason}")
         sys.exit(1)
 
+    # Upload the artifact the API actually serves *before* the registry claims
+    # this version is production -- if the upload fails, we want to exit here
+    # with the registry still untouched, not have MLflow/Postgres say
+    # "production" while the deployed checkpoint is still the old one.
+    if args.s3_uri:
+        bucket, _, key = args.s3_uri.removeprefix("s3://").partition("/")
+        with tempfile.NamedTemporaryFile(suffix=".pt") as tmp:
+            torch.save(model.state_dict(), tmp.name)
+            boto3.client("s3").upload_file(tmp.name, bucket, key)
+        print(f"uploaded checkpoint to {args.s3_uri}")
+
     client.set_registered_model_alias(args.model_name, "production", version_info.version)
     init_schema(args.dsn)
     record_model_version(
@@ -81,13 +92,6 @@ def main() -> None:
     )
     print(f"promoted {args.model_name} v{version_info.version} to production "
           f"(MLflow registry + Postgres model_versions)")
-
-    if args.s3_uri:
-        bucket, _, key = args.s3_uri.removeprefix("s3://").partition("/")
-        with tempfile.NamedTemporaryFile(suffix=".pt") as tmp:
-            torch.save(model.state_dict(), tmp.name)
-            boto3.client("s3").upload_file(tmp.name, bucket, key)
-        print(f"uploaded checkpoint to {args.s3_uri}")
 
 
 if __name__ == "__main__":
