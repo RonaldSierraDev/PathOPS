@@ -79,28 +79,28 @@ A containerized ML pipeline that fine-tunes an open-source vision model on the P
 ## Week-by-Week Plan
 
 ### Week 1 — Ugly but end-to-end (the most important week)
-- [ ] Download PCam, write a data loader, sanity-check class balance
-- [ ] Fine-tune a small pretrained model locally — target "good enough" (~85%+ AUC), not SOTA
-- [ ] Wrap inference in FastAPI: `POST /predict` takes an image, returns label + confidence
-- [ ] Dockerize the API and run it locally
+- [x] Download PCam, write a data loader, sanity-check class balance
+- [x] Fine-tune a small pretrained model locally — target "good enough" (~85%+ AUC), not SOTA
+- [x] Wrap inference in FastAPI: `POST /predict` takes an image, returns label + confidence
+- [x] Dockerize the API and run it locally
 - **Exit criteria:** `curl` a local container with a patch image and get a prediction back
 
 ### Week 2 — Rigorous evaluation, experiment tracking & model registry
-- [ ] **Build a real evaluation suite:** AUC + sensitivity/specificity at a chosen operating threshold, confusion matrix, PR curve. Accuracy alone is near-meaningless for a screening task.
-- [ ] **Choose and justify the operating threshold explicitly** — false negatives (missed metastasis) are far costlier than false positives. Document the tradeoff.
-- [ ] Add temperature scaling (Guo et al.) and plot reliability diagrams before/after
-- [ ] Integrate MLflow: log params, metrics, artifacts for every training run
-- [ ] Set up model registry with staging/production stages
-- [ ] Refactor training into a reproducible script (config-driven, seeded)
-- [ ] Store dataset + model artifacts in S3
-- [ ] Stand up PostgreSQL locally (Docker container) with schema: `predictions`, `model_versions`, `feedback`
+- [x] **Build a real evaluation suite:** AUC + sensitivity/specificity at a chosen operating threshold, confusion matrix, PR curve. Accuracy alone is near-meaningless for a screening task.
+- [x] **Choose and justify the operating threshold explicitly** — false negatives (missed metastasis) are far costlier than false positives. Document the tradeoff.
+- [x] Add temperature scaling (Guo et al.) and plot reliability diagrams before/after
+- [x] Integrate MLflow: log params, metrics, artifacts for every training run
+- [x] Set up model registry with staging/production stages
+- [x] Refactor training into a reproducible script (config-driven, seeded)
+- [x] Store dataset + model artifacts in S3
+- [x] Stand up PostgreSQL locally (Docker container) with schema: `predictions`, `model_versions`, `feedback`
 
 ### Week 3 — Cloud deployment
-- [ ] Push Docker image to ECR
-- [ ] Deploy inference service on ECS Fargate (or Lambda if latency/size permits)
-- [ ] Provision RDS PostgreSQL; point the inference service at it for prediction logging
-- [ ] Write Terraform for all AWS resources (S3, ECR, ECS, RDS, IAM roles, security groups)
-- [ ] **Set a billing alarm BEFORE provisioning RDS** — a running instance bills continuously and is the most likely source of a surprise charge. Verify current AWS free tier terms directly; they have changed recently.
+- [x] Push Docker image to ECR
+- [x] Deploy inference service on ECS Fargate (or Lambda if latency/size permits)
+- [x] Provision RDS PostgreSQL; point the inference service at it for prediction logging
+- [x] Write Terraform for all AWS resources (S3, ECR, ECS, RDS, IAM roles, security groups)
+- [x] **Set a billing alarm BEFORE provisioning RDS** — a running instance bills continuously and is the most likely source of a surprise charge. Verify current AWS free tier terms directly; they have changed recently.
 - **Exit criteria:** public (or auth-gated) endpoint serving predictions from AWS, fully reproducible via `terraform apply`
 
 ### Week 4 — CI/CD

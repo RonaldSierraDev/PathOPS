@@ -8,7 +8,7 @@ Full design doc, week-by-week plan, and the longer-term Phase 2 vision (an ontol
 
 ## Status
 
-**Week 1 complete.** Data pipeline, model, training loop, evaluation, threshold selection, and inference API are all wired up and tested end-to-end on real data, and the API runs in Docker: `curl` a running container and get a real prediction back, verified against a trained checkpoint.
+**Weeks 1-3 complete.** Data pipeline, model, training loop, real evaluation suite (AUC/sensitivity/specificity, confusion matrix, PR curve, temperature-scaling calibration), MLflow tracking + model registry with a gated promotion script, Postgres prediction/feedback schema, and the inference API are all wired up and tested end-to-end. The API is deployed on AWS: S3 (model artifacts), ECR (image registry), ECS Fargate Spot (serving), and RDS Postgres (prediction logging), all provisioned via Terraform in `terraform/`.
 
 **First baseline (ResNet18, 5 epochs, ImageNet-pretrained, no augmentation) on held-out test:**
 
@@ -73,11 +73,51 @@ docker run -d --name pathml-api -p 8000:8000 -v $(pwd)/models:/app/models:ro pat
 curl -X POST http://localhost:8000/predict -F "file=@path/to/patch.png"
 ```
 
+## Deploying to AWS
+
+Requires `aws configure` already set up locally with a user that can create S3/ECR/RDS/ECS/IAM resources, plus Terraform and Docker.
+
+```
+# 1. provision S3, ECR, RDS, and the ECS Fargate service
+cd terraform
+terraform init
+terraform plan -out=tfplan   # review before applying -- this creates real, billed resources
+terraform apply tfplan
+
+# 2. build the image (the Dockerfile installs CPU-only torch -- see the comment
+#    in docker/Dockerfile; installing the default PyPI torch wheel pulls in
+#    ~6GB of unused CUDA libraries) and push it to the ECR repo just created
+ECR_URL=$(terraform output -raw ecr_repository_url)
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "$ECR_URL"
+docker build -f ../docker/Dockerfile -t pathml-api:latest ..
+docker tag pathml-api:latest "$ECR_URL:latest"
+docker push "$ECR_URL:latest"
+
+# 3. upload the trained checkpoint to S3 -- the API downloads this at container
+#    startup (see MODEL_S3_URI in the ECS task definition / pathml.api.main)
+BUCKET=$(terraform output -raw s3_artifacts_bucket)
+aws s3 cp ../models/pcam_resnet18.pt "s3://$BUCKET/models/pcam_resnet18.pt"
+
+# 4. the first deployment fails to pull :latest since ECR was empty at apply time --
+#    kick off a fresh one now that the image and model both exist
+aws ecs update-service --cluster pathml-cluster --service pathml-api --force-new-deployment
+
+# 5. find the running task's public IP and hit it
+TASK_ARN=$(aws ecs list-tasks --cluster pathml-cluster --service-name pathml-api --query 'taskArns[0]' --output text)
+ENI_ID=$(aws ecs describe-tasks --cluster pathml-cluster --tasks "$TASK_ARN" --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text)
+PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI_ID" --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+curl -X POST "http://$PUBLIC_IP:8000/predict" -F "file=@path/to/patch.png"
+```
+
+**Cost note:** the ECS service runs on Fargate Spot (not on-demand) and RDS defaults to `db.t4g.micro`, both chosen to stay close to the project's own ~$10/mo budget rule -- see the cost comments in `terraform/ecs.tf` and `terraform/rds.tf`. The public IP changes on every redeploy since there's no load balancer (deliberately, to avoid its fixed monthly cost); re-run step 5 after any `force-new-deployment`.
+
+**Tearing down:** `terraform destroy` from `terraform/` removes everything (RDS is the piece that keeps billing while idle). To pause without destroying, set `desired_count = 0` (`terraform apply -var desired_count=0`) to stop the Fargate task while keeping RDS/S3/ECR intact.
+
 ## Roadmap (Phase 1, ~6 weeks)
 
 1. **Week 1 (done)** — dataloader, first fine-tuned model, FastAPI + Docker end-to-end
-2. **Week 2** — real evaluation suite, MLflow tracking, model registry, Postgres
-3. **Week 3** — AWS deployment (ECR/ECS/RDS) via Terraform
+2. **Week 2 (done)** — real evaluation suite, MLflow tracking, model registry, Postgres
+3. **Week 3 (done)** — AWS deployment (S3/ECR/ECS/RDS) via Terraform
 4. **Week 4** — CI/CD, retraining loop off the feedback table
 5. **Week 5** — prediction logging, drift detection, alerting
 6. **Week 6** — polish, docs, teardown

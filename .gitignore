@@ -36,6 +36,8 @@ mlflow.db
 *.tfstate
 *.tfstate.*
 *.tfvars
+*.tfplan
+tfplan*
 crash.log
 
 # Docker
