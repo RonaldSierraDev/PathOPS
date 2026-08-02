@@ -139,6 +139,8 @@ def main() -> None:
                          help="S3 bucket the API stored corrected predictions' images in; required if "
                               "--feedback-export-url is set")
     args = parser.parse_args()
+    if args.feedback_export_url and not args.feedback_images_s3_bucket:
+        parser.error("--feedback-images-s3-bucket is required when --feedback-export-url is set")
 
     train(Path(args.data_dir), args.epochs, args.batch_size, args.lr, args.model_name, Path(args.out),
           pretrained=args.pretrained, seed=args.seed, tracking_uri=args.tracking_uri,
