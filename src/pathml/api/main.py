@@ -10,21 +10,29 @@ import psycopg2
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from PIL import Image
+from pydantic import BaseModel
 
-from pathml.db.schema import init_schema, record_model_version
+from pathml.db.schema import (
+    LABELS,
+    init_schema,
+    prediction_image_key,
+    record_model_version,
+)
 from pathml.models.classifier import build_classifier
 
 app = FastAPI(title="PathML Inference API")
 
 CHECKPOINT_PATH = Path("models/pcam_resnet18.pt")
 MODEL_NAME = "resnet18"
-LABELS = ("no_tumor", "tumor")
 
-# Both optional so local dev/tests need no S3 or Postgres: unset MODEL_S3_URI keeps
-# the checkpoint local, unset DATABASE_URL skips prediction logging entirely.
+# All optional so local dev/tests need no S3 or Postgres: unset MODEL_S3_URI keeps
+# the checkpoint local, unset DATABASE_URL skips prediction logging entirely, and
+# unset PREDICTION_IMAGES_S3_BUCKET skips storing the uploaded image (in which case
+# feedback corrections are still recorded but retraining can't recover the image).
 MODEL_S3_URI = os.environ.get("MODEL_S3_URI")
 MODEL_VERSION = int(os.environ.get("MODEL_VERSION", "1"))
 DATABASE_URL = os.environ.get("DATABASE_URL")
+PREDICTION_IMAGES_S3_BUCKET = os.environ.get("PREDICTION_IMAGES_S3_BUCKET")
 
 _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _model = None
@@ -64,15 +72,27 @@ def _get_model_version_id() -> int:
     return _model_version_id
 
 
-def _log_prediction(input_bytes: bytes, label: str, confidence: float) -> None:
+def _log_prediction(input_bytes: bytes, label: str, confidence: float) -> int:
     input_hash = hashlib.sha256(input_bytes).hexdigest()
     with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO predictions (model_version_id, input_hash, predicted_label, confidence) "
-            "VALUES (%s, %s, %s, %s)",
+            "VALUES (%s, %s, %s, %s) RETURNING id",
             (_get_model_version_id(), input_hash, label, confidence),
         )
+        prediction_id = cur.fetchone()[0]
         conn.commit()
+
+    # Predictions are only content-addressed by hash in Postgres -- without also
+    # keeping the actual bytes somewhere, a later correction has no image for
+    # retraining to learn from. Best-effort: a duplicate upload for a repeated
+    # hash just overwrites the same key, which is fine.
+    if PREDICTION_IMAGES_S3_BUCKET:
+        boto3.client("s3").put_object(
+            Bucket=PREDICTION_IMAGES_S3_BUCKET, Key=prediction_image_key(input_hash), Body=input_bytes,
+        )
+
+    return prediction_id
 
 
 def _preprocess(image: Image.Image) -> torch.Tensor:
@@ -103,7 +123,57 @@ async def predict(file: UploadFile = File(...)) -> dict:
     label_idx = int(probs.argmax())
     label, confidence = LABELS[label_idx], float(probs[label_idx])
 
+    response = {"label": label, "confidence": confidence}
     if DATABASE_URL:
-        _log_prediction(raw_bytes, label, confidence)
+        response["prediction_id"] = _log_prediction(raw_bytes, label, confidence)
 
-    return {"label": label, "confidence": confidence}
+    return response
+
+
+class FeedbackRequest(BaseModel):
+    prediction_id: int
+    corrected_label: str
+    note: str | None = None
+
+
+@app.post("/feedback")
+def submit_feedback(feedback: FeedbackRequest) -> dict:
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="feedback requires DATABASE_URL to be configured")
+    if feedback.corrected_label not in LABELS:
+        raise HTTPException(status_code=400, detail=f"corrected_label must be one of {LABELS}")
+
+    try:
+        with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO feedback (prediction_id, corrected_label, note) VALUES (%s, %s, %s) RETURNING id",
+                (feedback.prediction_id, feedback.corrected_label, feedback.note),
+            )
+            feedback_id = cur.fetchone()[0]
+            conn.commit()
+    except psycopg2.errors.ForeignKeyViolation:
+        raise HTTPException(status_code=404, detail=f"no prediction with id {feedback.prediction_id}")
+
+    return {"feedback_id": feedback_id}
+
+
+@app.get("/feedback/export")
+def export_feedback() -> list[dict]:
+    """Corrections available for retraining, as (input_hash, corrected_label) pairs.
+
+    Exists so retraining can pull feedback over plain HTTPS from wherever it
+    actually runs (e.g. a self-hosted runner on a contributor's own machine)
+    without needing a network path into RDS, which is deliberately not
+    reachable from outside the VPC. Not authenticated, same as /predict and
+    /feedback -- it reveals labels only, not the images themselves.
+    """
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="feedback export requires DATABASE_URL to be configured")
+
+    with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT p.input_hash, f.corrected_label FROM feedback f JOIN predictions p ON p.id = f.prediction_id"
+        )
+        rows = cur.fetchall()
+
+    return [{"input_hash": input_hash, "corrected_label": corrected_label} for input_hash, corrected_label in rows]

@@ -10,10 +10,11 @@ import numpy as np
 import torch
 from mlflow import MlflowClient
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader
 
 from pathml.data.dataset import PCamDataset
 from pathml.models.classifier import build_classifier
+from pathml.training.feedback import FeedbackDataset
 from pathml.training.metrics import evaluate
 
 EXPERIMENT_NAME = "pcam-classification"
@@ -38,11 +39,22 @@ def train(
     pretrained: bool = True,
     seed: int = 42,
     tracking_uri: str = DEFAULT_TRACKING_URI,
+    feedback_export_url: str | None = None,
+    feedback_images_s3_bucket: str | None = None,
 ) -> None:
     _set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_ds = PCamDataset(data_dir, "train")
+    feedback_size = 0
+    # The design doc's "close the loop" requirement: retraining should learn
+    # from pathologist corrections logged via the API's /feedback endpoint,
+    # not just the static PCam split.
+    if feedback_export_url:
+        feedback_ds = FeedbackDataset(feedback_export_url, feedback_images_s3_bucket)
+        feedback_size = len(feedback_ds)
+        if feedback_size:
+            train_ds = ConcatDataset([train_ds, feedback_ds])
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=4)
 
     valid_ds = PCamDataset(data_dir, "valid")
@@ -64,6 +76,7 @@ def train(
             "seed": seed,
             "train_size": len(train_ds),
             "valid_size": len(valid_ds),
+            "feedback_size": feedback_size,
         })
 
         for epoch in range(epochs):
@@ -119,10 +132,17 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tracking-uri", default=DEFAULT_TRACKING_URI,
                          help="MLflow tracking store, e.g. sqlite:///mlflow.db")
+    parser.add_argument("--feedback-export-url", default=None,
+                         help="e.g. http://<api-host>:8000/feedback/export -- pulls pathologist corrections "
+                              "from the running API; omit to train on the static PCam split only")
+    parser.add_argument("--feedback-images-s3-bucket", default=None,
+                         help="S3 bucket the API stored corrected predictions' images in; required if "
+                              "--feedback-export-url is set")
     args = parser.parse_args()
 
     train(Path(args.data_dir), args.epochs, args.batch_size, args.lr, args.model_name, Path(args.out),
-          pretrained=args.pretrained, seed=args.seed, tracking_uri=args.tracking_uri)
+          pretrained=args.pretrained, seed=args.seed, tracking_uri=args.tracking_uri,
+          feedback_export_url=args.feedback_export_url, feedback_images_s3_bucket=args.feedback_images_s3_bucket)
 
 
 if __name__ == "__main__":

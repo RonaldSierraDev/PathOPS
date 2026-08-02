@@ -38,6 +38,7 @@ resource "aws_ecs_task_definition" "api" {
       environment = [
         { name = "MODEL_S3_URI", value = "s3://${aws_s3_bucket.artifacts.bucket}/models/pcam_resnet18.pt" },
         { name = "MODEL_VERSION", value = "1" },
+        { name = "PREDICTION_IMAGES_S3_BUCKET", value = aws_s3_bucket.artifacts.bucket },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.database_url.arn },

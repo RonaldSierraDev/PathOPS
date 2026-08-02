@@ -3,7 +3,11 @@ from matplotlib.figure import Figure
 
 from pathml.training.calibration import reliability_bins
 from pathml.training.metrics import metrics_at_threshold, precision_recall_curve
-from pathml.training.plots import plot_confusion_matrix, plot_pr_curve, plot_reliability_diagram
+from pathml.training.plots import (
+    plot_confusion_matrix,
+    plot_pr_curve,
+    plot_reliability_diagram,
+)
 
 
 def test_plot_confusion_matrix_runs_and_returns_figure():

@@ -1,0 +1,71 @@
+name: Retrain
+
+# workflow_dispatch is the only trigger, deliberately -- GitHub requires
+# write access to the repo to fire this event, so a forked PR can never
+# invoke it even though the repo is public. That's what makes it safe to
+# run on a self-hosted runner (see terraform/... note: this workflow does
+# NOT use the OIDC deploy role or any GitHub secret; it relies on the AWS
+# CLI credentials already configured locally on the runner machine).
+on:
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: "Training epochs"
+        default: "3"
+      batch_size:
+        description: "Batch size"
+        default: "64"
+      lr:
+        description: "Learning rate"
+        default: "0.0001"
+      tracking_uri:
+        description: "MLflow tracking store (absolute path -- must match what scripts/promote_model.py reads from on this machine)"
+        default: "sqlite:////home/ronald/projects/PathOPS/mlflow.db"
+
+permissions:
+  contents: read
+
+jobs:
+  retrain:
+    runs-on: [self-hosted, pathml-local]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Download PCam dataset if not already cached
+        run: |
+          if [ ! -f data/pcam/camelyonpatch_level_2_split_train_x.h5 ]; then
+            python scripts/download_pcam.py --data-dir data/pcam
+          fi
+
+      - name: Resolve the running API's current public IP
+        id: api
+        run: |
+          TASK_ARN=$(aws ecs list-tasks --cluster "${{ vars.ECS_CLUSTER }}" --service-name "${{ vars.ECS_SERVICE }}" --query 'taskArns[0]' --output text)
+          ENI_ID=$(aws ecs describe-tasks --cluster "${{ vars.ECS_CLUSTER }}" --tasks "$TASK_ARN" --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text)
+          PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI_ID" --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+          echo "url=http://$PUBLIC_IP:8000/feedback/export" >> "$GITHUB_OUTPUT"
+
+      - name: Retrain, blending in feedback corrections
+        run: |
+          python -m pathml.training.train \
+            --data-dir data/pcam \
+            --epochs "${{ inputs.epochs }}" \
+            --batch-size "${{ inputs.batch_size }}" \
+            --lr "${{ inputs.lr }}" \
+            --tracking-uri "${{ inputs.tracking_uri }}" \
+            --feedback-export-url "${{ steps.api.outputs.url }}" \
+            --feedback-images-s3-bucket "${{ vars.S3_ARTIFACTS_BUCKET }}"
+
+      - name: Next step (manual)
+        run: |
+          echo "Training complete and registered to MLflow under alias 'staging'."
+          echo "This intentionally does NOT auto-promote -- review the run, then from your own machine run:"
+          echo "  python scripts/promote_model.py --alias staging --s3-uri s3://${{ vars.S3_ARTIFACTS_BUCKET }}/models/pcam_resnet18.pt"

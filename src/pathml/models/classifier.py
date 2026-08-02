@@ -1,6 +1,6 @@
 """Binary classification model for PCam patches."""
-import torch.nn as nn
 import timm
+from torch import nn
 
 
 def build_classifier(model_name: str = "resnet18", pretrained: bool = True) -> nn.Module:

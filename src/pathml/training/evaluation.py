@@ -6,14 +6,17 @@ run the exact same evaluation logic regardless of where the model came from.
 """
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
 
 import torch
 from matplotlib.figure import Figure
 from torch.utils.data import DataLoader
 
 from pathml.data.dataset import PCamDataset
-from pathml.training.calibration import expected_calibration_error, fit_temperature, reliability_bins
+from pathml.training.calibration import (
+    expected_calibration_error,
+    fit_temperature,
+    reliability_bins,
+)
 from pathml.training.metrics import (
     Metrics,
     logits_and_labels,
@@ -21,7 +24,11 @@ from pathml.training.metrics import (
     precision_recall_curve,
     select_threshold,
 )
-from pathml.training.plots import plot_confusion_matrix, plot_pr_curve, plot_reliability_diagram
+from pathml.training.plots import (
+    plot_confusion_matrix,
+    plot_pr_curve,
+    plot_reliability_diagram,
+)
 
 
 @dataclass
@@ -37,10 +44,10 @@ class EvaluationResult:
 
 def evaluate_checkpoint(
     model: torch.nn.Module,
-    data_dir: Union[str, Path],
+    data_dir: str | Path,
     batch_size: int = 64,
     min_sensitivity: float = 0.95,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
 ) -> EvaluationResult:
     """Run the full evaluation suite against an already-loaded model.
 

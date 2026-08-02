@@ -10,6 +10,16 @@ import psycopg2
 
 DEFAULT_DSN = "postgresql://pathml:pathml@localhost:5432/pathml"
 
+# Shared between the inference API (which writes predictions/feedback) and
+# the training pipeline (which reads corrections back out for retraining).
+LABELS = ("no_tumor", "tumor")
+PREDICTION_IMAGES_PREFIX = "predictions"
+
+
+def prediction_image_key(input_hash: str) -> str:
+    """S3 key an uploaded image is stored under, keyed by its content hash."""
+    return f"{PREDICTION_IMAGES_PREFIX}/{input_hash}.png"
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS model_versions (
     id SERIAL PRIMARY KEY,

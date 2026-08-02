@@ -1,6 +1,6 @@
 """PyTorch Dataset for the PatchCamelyon (PCam) histopathology dataset."""
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional, Union
 
 import h5py
 import torch
@@ -21,7 +21,7 @@ class PCamDataset(Dataset):
     processes a DataLoader forks (num_workers > 0).
     """
 
-    def __init__(self, data_dir: Union[str, Path], split: str, transform: Optional[Callable] = None):
+    def __init__(self, data_dir: str | Path, split: str, transform: Callable | None = None):
         self._xf = None
         self._yf = None
 

@@ -5,7 +5,6 @@ import concurrent.futures
 import gzip
 import hashlib
 import shutil
-import sys
 import threading
 import urllib.request
 from pathlib import Path
@@ -18,24 +17,24 @@ ZENODO_CONTENT_URL = "https://zenodo.org/api/records/2546921/files/{key}/content
 # confirmed by checksum comparison, not assumed. `source` corrects for that so the
 # file saved locally as e.g. valid_x is actually the official valid split.
 FILES = [
-    dict(split="train", kind="x", name="camelyonpatch_level_2_split_train_x.h5.gz",
-         source="camelyonpatch_level_2_split_train_x.h5.gz", md5="1571f514728f59376b705fc836ff4b63"),
-    dict(split="train", kind="y", name="camelyonpatch_level_2_split_train_y.h5.gz",
-         source="camelyonpatch_level_2_split_train_y.h5.gz", md5="35c2d7259d906cfc8143347bb8e05be7"),
-    dict(split="train", kind="meta", name="camelyonpatch_level_2_split_train_meta.csv",
-         source="camelyonpatch_level_2_split_train_meta.csv", md5="5a3dd671e465cfd74b5b822125e65b0a"),
-    dict(split="valid", kind="x", name="camelyonpatch_level_2_split_valid_x.h5.gz",
-         source="camelyonpatch_level_2_split_test_x.h5.gz", md5="d8c2d60d490dbd479f8199bdfa0cf6ec"),
-    dict(split="valid", kind="y", name="camelyonpatch_level_2_split_valid_y.h5.gz",
-         source="camelyonpatch_level_2_split_test_y.h5.gz", md5="60a7035772fbdb7f34eb86d4420cf66a"),
-    dict(split="valid", kind="meta", name="camelyonpatch_level_2_split_valid_meta.csv",
-         source="camelyonpatch_level_2_split_test_meta.csv", md5="3455fd69135b66734e1008f3af684566"),
-    dict(split="test", kind="x", name="camelyonpatch_level_2_split_test_x.h5.gz",
-         source="camelyonpatch_level_2_split_valid_x.h5.gz", md5="d5b63470df7cfa627aeec8b9dc0c066e"),
-    dict(split="test", kind="y", name="camelyonpatch_level_2_split_test_y.h5.gz",
-         source="camelyonpatch_level_2_split_valid_y.h5.gz", md5="2b85f58b927af9964a4c15b8f7e8f179"),
-    dict(split="test", kind="meta", name="camelyonpatch_level_2_split_test_meta.csv",
-         source="camelyonpatch_level_2_split_valid_meta.csv", md5="67589e00a4a37ec317f2d1932c7502ca"),
+    {"split": "train", "kind": "x", "name": "camelyonpatch_level_2_split_train_x.h5.gz",
+     "source": "camelyonpatch_level_2_split_train_x.h5.gz", "md5": "1571f514728f59376b705fc836ff4b63"},
+    {"split": "train", "kind": "y", "name": "camelyonpatch_level_2_split_train_y.h5.gz",
+     "source": "camelyonpatch_level_2_split_train_y.h5.gz", "md5": "35c2d7259d906cfc8143347bb8e05be7"},
+    {"split": "train", "kind": "meta", "name": "camelyonpatch_level_2_split_train_meta.csv",
+     "source": "camelyonpatch_level_2_split_train_meta.csv", "md5": "5a3dd671e465cfd74b5b822125e65b0a"},
+    {"split": "valid", "kind": "x", "name": "camelyonpatch_level_2_split_valid_x.h5.gz",
+     "source": "camelyonpatch_level_2_split_test_x.h5.gz", "md5": "d8c2d60d490dbd479f8199bdfa0cf6ec"},
+    {"split": "valid", "kind": "y", "name": "camelyonpatch_level_2_split_valid_y.h5.gz",
+     "source": "camelyonpatch_level_2_split_test_y.h5.gz", "md5": "60a7035772fbdb7f34eb86d4420cf66a"},
+    {"split": "valid", "kind": "meta", "name": "camelyonpatch_level_2_split_valid_meta.csv",
+     "source": "camelyonpatch_level_2_split_test_meta.csv", "md5": "3455fd69135b66734e1008f3af684566"},
+    {"split": "test", "kind": "x", "name": "camelyonpatch_level_2_split_test_x.h5.gz",
+     "source": "camelyonpatch_level_2_split_valid_x.h5.gz", "md5": "d5b63470df7cfa627aeec8b9dc0c066e"},
+    {"split": "test", "kind": "y", "name": "camelyonpatch_level_2_split_test_y.h5.gz",
+     "source": "camelyonpatch_level_2_split_valid_y.h5.gz", "md5": "2b85f58b927af9964a4c15b8f7e8f179"},
+    {"split": "test", "kind": "meta", "name": "camelyonpatch_level_2_split_test_meta.csv",
+     "source": "camelyonpatch_level_2_split_valid_meta.csv", "md5": "67589e00a4a37ec317f2d1932c7502ca"},
 ]
 
 

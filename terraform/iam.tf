@@ -34,7 +34,8 @@ resource "aws_iam_role_policy" "ecs_task_execution_ssm" {
 }
 
 # Task role: what the running application (the FastAPI process) is allowed
-# to do -- here, download the model checkpoint from S3.
+# to do -- download the model checkpoint, and write back the images behind
+# any feedback correction (see PREDICTION_IMAGES_S3_BUCKET in pathml.api.main).
 resource "aws_iam_role" "ecs_task" {
   name               = "${var.project_name}-ecs-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
@@ -42,8 +43,15 @@ resource "aws_iam_role" "ecs_task" {
 
 data "aws_iam_policy_document" "ecs_task_s3" {
   statement {
+    sid       = "ReadModelArtifacts"
     actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.artifacts.arn}/*"]
+    resources = ["${aws_s3_bucket.artifacts.arn}/models/*"]
+  }
+
+  statement {
+    sid       = "WritePredictionImages"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.artifacts.arn}/predictions/*"]
   }
 }
 
