@@ -41,9 +41,14 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
       values   = ["sts.amazonaws.com"]
     }
     condition {
-      test     = "StringEquals"
+      # GitHub now embeds the owner's and repo's immutable numeric IDs in the
+      # sub claim -- "repo:OWNER@ownerID/REPO@repoID:ref:refs/heads/BRANCH" --
+      # not the plain "OWNER/REPO" form older docs/examples show. StringLike
+      # wildcards only the numeric ID segments; owner name, repo name, and
+      # branch still have to match exactly.
+      test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:ref:refs/heads/${var.github_default_branch}"]
+      values   = ["repo:${split("/", var.github_repo)[0]}@*/${split("/", var.github_repo)[1]}@*:ref:refs/heads/${var.github_default_branch}"]
     }
   }
 }
