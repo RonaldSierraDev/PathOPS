@@ -2,6 +2,7 @@
 import hashlib
 import io
 import os
+import time
 from pathlib import Path
 
 import boto3
@@ -72,13 +73,13 @@ def _get_model_version_id() -> int:
     return _model_version_id
 
 
-def _log_prediction(input_bytes: bytes, label: str, confidence: float) -> int:
+def _log_prediction(input_bytes: bytes, label: str, confidence: float, latency_ms: float) -> int:
     input_hash = hashlib.sha256(input_bytes).hexdigest()
     with psycopg2.connect(DATABASE_URL) as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO predictions (model_version_id, input_hash, predicted_label, confidence) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
-            (_get_model_version_id(), input_hash, label, confidence),
+            "INSERT INTO predictions (model_version_id, input_hash, predicted_label, confidence, latency_ms) "
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (_get_model_version_id(), input_hash, label, confidence, latency_ms),
         )
         prediction_id = cur.fetchone()[0]
         conn.commit()
@@ -114,18 +115,21 @@ async def predict(file: UploadFile = File(...)) -> dict:
 
     model = _load_model()
     raw_bytes = await file.read()
+
+    start = time.perf_counter()
     image = Image.open(io.BytesIO(raw_bytes))
     tensor = _preprocess(image).to(_device)
 
     with torch.no_grad():
         probs = torch.softmax(model(tensor), dim=1)[0]
+    latency_ms = (time.perf_counter() - start) * 1000
 
     label_idx = int(probs.argmax())
     label, confidence = LABELS[label_idx], float(probs[label_idx])
 
     response = {"label": label, "confidence": confidence}
     if DATABASE_URL:
-        response["prediction_id"] = _log_prediction(raw_bytes, label, confidence)
+        response["prediction_id"] = _log_prediction(raw_bytes, label, confidence, latency_ms)
 
     return response
 

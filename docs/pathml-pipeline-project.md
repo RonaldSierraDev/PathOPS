@@ -104,15 +104,15 @@ A containerized ML pipeline that fine-tunes an open-source vision model on the P
 - **Exit criteria:** public (or auth-gated) endpoint serving predictions from AWS, fully reproducible via `terraform apply`
 
 ### Week 4 — CI/CD
-- [ ] GitHub Actions: lint + tests on PR; on merge to main → build image → push to ECR → redeploy
-- [ ] Add a retraining workflow: manual dispatch (or data-change trigger) → retrain → log to MLflow → require manual promotion to production
-- [ ] **Close the loop:** retraining pulls corrected labels from the Postgres `feedback` table, not a static dataset. This is what separates a demo pipeline from one that models how production ML actually evolves.
+- [x] GitHub Actions: lint + tests on PR; on merge to main → build image → push to ECR → redeploy
+- [x] Add a retraining workflow: manual dispatch (or data-change trigger) → retrain → log to MLflow → require manual promotion to production
+- [x] **Close the loop:** retraining pulls corrected labels from the Postgres `feedback` table, not a static dataset. This is what separates a demo pipeline from one that models how production ML actually evolves.
 - **Exit criteria:** merging a PR ships a new model/API version with zero manual steps
 
 ### Week 5 — Monitoring & drift
-- [ ] Log every prediction (input hash, output, confidence, latency) to S3/CloudWatch
-- [ ] Add drift detection (Evidently or custom): compare live input distribution vs. training distribution
-- [ ] Alarm/alert on drift or error-rate spike
+- [x] Log every prediction (input hash, output, confidence, latency) to S3/CloudWatch
+- [x] Add drift detection (Evidently or custom): compare live input distribution vs. training distribution
+- [x] Alarm/alert on drift or error-rate spike
 - **Exit criteria:** demonstrable drift alert (e.g., feed it non-pathology images and show the monitor firing)
 
 ### Week 6 — Polish & presentation

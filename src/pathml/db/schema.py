@@ -37,9 +37,15 @@ CREATE TABLE IF NOT EXISTS predictions (
     input_hash TEXT NOT NULL,
     predicted_label TEXT NOT NULL,
     confidence DOUBLE PRECISION NOT NULL,
+    latency_ms DOUBLE PRECISION,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_predictions_model_version ON predictions(model_version_id);
+
+-- Runs against a table that may already exist in a deployed environment
+-- (this schema shipped once already without this column) -- ADD COLUMN IF
+-- NOT EXISTS patches it in place instead of requiring a drop/recreate.
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS latency_ms DOUBLE PRECISION;
 
 CREATE TABLE IF NOT EXISTS feedback (
     id SERIAL PRIMARY KEY,

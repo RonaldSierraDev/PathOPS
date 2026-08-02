@@ -69,8 +69,8 @@ def test_predict_logs_to_postgres_when_database_url_set(monkeypatch):
 
     logged = {}
     monkeypatch.setattr(
-        api_main, "_log_prediction", lambda input_bytes, label, confidence: logged.update(
-            input_bytes=input_bytes, label=label, confidence=confidence,
+        api_main, "_log_prediction", lambda input_bytes, label, confidence, latency_ms: logged.update(
+            input_bytes=input_bytes, label=label, confidence=confidence, latency_ms=latency_ms,
         ),
     )
 
@@ -81,6 +81,7 @@ def test_predict_logs_to_postgres_when_database_url_set(monkeypatch):
     assert response.status_code == 200
     assert logged["input_bytes"] == image_bytes
     assert logged["label"] == response.json()["label"]
+    assert logged["latency_ms"] >= 0
 
 
 def _png_bytes() -> bytes:
@@ -111,7 +112,7 @@ def test_log_prediction_uploads_image_to_s3_when_bucket_set(monkeypatch):
     monkeypatch.setattr(api_main.psycopg2, "connect", lambda dsn: _FakeConnection())
     monkeypatch.setattr(api_main, "DATABASE_URL", "postgresql://fake-dsn")
 
-    prediction_id = api_main._log_prediction(b"raw image bytes", "tumor", 0.9)
+    prediction_id = api_main._log_prediction(b"raw image bytes", "tumor", 0.9, 12.5)
 
     assert prediction_id == 42
     assert len(uploads) == 1

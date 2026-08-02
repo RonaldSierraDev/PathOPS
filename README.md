@@ -8,7 +8,7 @@ Full design doc, week-by-week plan, and the longer-term Phase 2 vision (an ontol
 
 ## Status
 
-**Weeks 1-3 complete.** Data pipeline, model, training loop, real evaluation suite (AUC/sensitivity/specificity, confusion matrix, PR curve, temperature-scaling calibration), MLflow tracking + model registry with a gated promotion script, Postgres prediction/feedback schema, and the inference API are all wired up and tested end-to-end. The API is deployed on AWS: S3 (model artifacts), ECR (image registry), ECS Fargate Spot (serving), and RDS Postgres (prediction logging), all provisioned via Terraform in `terraform/`.
+**Weeks 1-5 complete.** Data pipeline, model, training loop, real evaluation suite (AUC/sensitivity/specificity, confusion matrix, PR curve, temperature-scaling calibration), MLflow tracking + model registry with a gated promotion script, Postgres prediction/feedback schema, and the inference API are all wired up and tested end-to-end. The API is deployed on AWS: S3 (model artifacts), ECR (image registry), ECS Fargate Spot (serving), and RDS Postgres (prediction logging), all provisioned via Terraform in `terraform/`. CI/CD (GitHub Actions, OIDC-authenticated) builds and redeploys on every merge; a `/feedback` loop lets retraining learn from corrections instead of the static dataset; a scheduled Lambda compares live traffic against the training distribution via Evidently and alerts through CloudWatch/SNS on drift or an error-rate spike.
 
 **First baseline (ResNet18, 5 epochs, ImageNet-pretrained, no augmentation) on held-out test:**
 
@@ -113,13 +113,28 @@ curl -X POST "http://$PUBLIC_IP:8000/predict" -F "file=@path/to/patch.png"
 
 **Tearing down:** `terraform destroy` from `terraform/` removes everything (RDS is the piece that keeps billing while idle). To pause without destroying, set `desired_count = 0` (`terraform apply -var desired_count=0`) to stop the Fargate task while keeping RDS/S3/ECR intact.
 
+## Monitoring & drift
+
+A scheduled Lambda (`terraform/monitoring.tf`) compares live traffic against the training distribution using Evidently, publishes a `DriftShare` CloudWatch metric, and alerts via SNS. It deliberately runs outside the VPC -- see the docstring in `pathml.monitoring.lambda_handler` -- so it costs a few cents a month, not a NAT gateway.
+
+```
+# one-time setup after the first `terraform apply` (needs alert_email, which has no
+# default so it's never committed -- pass via TF_VAR_alert_email)
+python scripts/compute_drift_baseline.py --data-dir data/pcam --s3-uri s3://$BUCKET/monitoring/baseline.csv
+
+# check your email and confirm the SNS subscription -- alarms fire either way,
+# but nothing is delivered to an unconfirmed subscription
+```
+
+To run a check on demand instead of waiting for the schedule (default `rate(6 hours)`): `aws lambda invoke --function-name pathml-drift-monitor out.json`. Each run's full HTML report lands in `s3://$BUCKET/monitoring/reports/`.
+
 ## Roadmap (Phase 1, ~6 weeks)
 
 1. **Week 1 (done)** — dataloader, first fine-tuned model, FastAPI + Docker end-to-end
 2. **Week 2 (done)** — real evaluation suite, MLflow tracking, model registry, Postgres
 3. **Week 3 (done)** — AWS deployment (S3/ECR/ECS/RDS) via Terraform
-4. **Week 4** — CI/CD, retraining loop off the feedback table
-5. **Week 5** — prediction logging, drift detection, alerting
+4. **Week 4 (done)** — CI/CD, retraining loop off the feedback table
+5. **Week 5 (done)** — prediction logging, drift detection, alerting
 6. **Week 6** — polish, docs, teardown
 
 See the [design doc](docs/pathml-pipeline-project.md) for full detail, scope rules, and Phase 2.
