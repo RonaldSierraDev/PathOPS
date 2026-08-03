@@ -73,6 +73,26 @@ docker run -d --name pathml-api -p 8000:8000 -v $(pwd)/models:/app/models:ro pat
 curl -X POST http://localhost:8000/predict -F "file=@path/to/patch.png"
 ```
 
+## Frontend (operations console)
+
+A Foundry-style ops dashboard (React + TypeScript + Tailwind, Blueprint icons, TanStack Query/Table, React Flow) lives in `frontend/`. Design tokens and conventions come from [`docs/frontend-design-system.md`](docs/frontend-design-system.md). Four views, each backed by read-only endpoints on the same API:
+
+| View | Shows | Endpoints |
+|---|---|---|
+| Console | Health, recent predictions, latency chart, upload → predict → correct-label | `/health`, `/predictions/recent`, `/predict`, `/feedback` |
+| Pipeline | Lifecycle DAG with live status per stage | `/health`, `/predictions/recent`, `/feedback/export` |
+| Registry | Model versions, aliases, predictions served | `/models` |
+| Drift | Drift share vs. alarm threshold, Evidently report links | `/monitoring/drift` |
+
+```
+# API must be running on :8000 (or set VITE_API_URL in frontend/.env)
+cd frontend
+npm install
+npm run dev   # http://localhost:5173
+```
+
+The API's CORS allow-list defaults to the Vite dev origins; set `ALLOWED_ORIGINS` on the deployed service for anything else. Without `DATABASE_URL` the console still works — prediction logging/feedback panels degrade with explicit messages.
+
 ## Deploying to AWS
 
 Requires `aws configure` already set up locally with a user that can create S3/ECR/RDS/ECS/IAM resources, plus Terraform and Docker.
@@ -127,6 +147,8 @@ python scripts/compute_drift_baseline.py --data-dir data/pcam --s3-uri s3://$BUC
 ```
 
 To run a check on demand instead of waiting for the schedule (default `rate(6 hours)`): `aws lambda invoke --function-name pathml-drift-monitor out.json`. Each run's full HTML report lands in `s3://$BUCKET/monitoring/reports/`.
+
+The API exposes this read-only at `GET /monitoring/drift` (drift history from the CloudWatch metric, plus presigned links to those reports) for the console's Drift view. It needs `S3_ARTIFACTS_BUCKET` set — Terraform wires it, along with the alarm's own threshold so the chart draws the line that actually fires.
 
 ## Roadmap (Phase 1, ~6 weeks)
 

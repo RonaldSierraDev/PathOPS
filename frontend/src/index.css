@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-paper-tint font-sans text-[15px] leading-relaxed text-ink antialiased;
+  }
+}
+
+@layer components {
+  /* Uppercase micro-label above sections/cards -- the "eyebrow". */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-eyebrow text-ink-mute;
+  }
+  .card {
+    @apply rounded-card border border-hairline bg-paper;
+  }
+  .btn {
+    @apply inline-flex h-8 items-center gap-2 rounded border px-3 text-[13px] font-medium
+      transition-colors duration-150 ease-out disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn border-accent bg-accent text-paper hover:bg-[#215DB0] hover:border-[#215DB0];
+  }
+  .btn-ghost {
+    @apply btn border-hairline bg-paper text-ink hover:bg-paper-tint;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
