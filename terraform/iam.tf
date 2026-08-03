@@ -83,19 +83,17 @@ resource "aws_iam_role_policy" "ecs_task_s3" {
   policy = data.aws_iam_policy_document.ecs_task_s3.json
 }
 
-# GetMetricStatistics has no resource-level permissions in CloudWatch -- it's
-# `*` or nothing. The namespace condition is what actually scopes this to the
-# project's own metrics.
+# GetMetricStatistics supports neither resource-level permissions nor a
+# namespace condition: cloudwatch:namespace is only populated for publishing
+# actions (PutMetricData), so gating a read on it silently denies every call
+# -- an absent condition key makes StringEquals false, which is an implicit
+# deny, not a pass. There is no way to scope this action, so it's granted
+# outright; it's read-only over metric data this project publishes anyway.
 data "aws_iam_policy_document" "ecs_task_cloudwatch" {
   statement {
     sid       = "ReadDriftMetric"
     actions   = ["cloudwatch:GetMetricStatistics"]
     resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "cloudwatch:namespace"
-      values   = [var.cloudwatch_namespace]
-    }
   }
 }
 
