@@ -12,6 +12,7 @@ import psycopg2
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel
 
@@ -62,6 +63,12 @@ CLOUDWATCH_NAMESPACE = os.environ.get("CLOUDWATCH_NAMESPACE", "PathML/Monitoring
 DRIFT_SHARE_THRESHOLD = float(os.environ.get("DRIFT_SHARE_THRESHOLD", "0.5"))
 DRIFT_REPORTS_PREFIX = "monitoring/reports/"
 DRIFT_REPORT_URL_TTL = 3600
+
+# Built into the image by docker/Dockerfile's first stage, relative to its
+# WORKDIR. Absent in a plain source checkout, where the console runs from the
+# Vite dev server instead -- so serving it is conditional (see the mount at
+# the bottom of this module).
+FRONTEND_DIST = Path(os.environ.get("FRONTEND_DIST", "frontend/dist"))
 
 _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _model = None
@@ -380,3 +387,11 @@ def recent_predictions(limit: int = 200) -> list[dict]:
         }
         for input_hash, predicted_label, confidence, latency_ms, created_at in rows
     ]
+
+
+# Mounted last on purpose: Starlette matches routes in registration order, so
+# every API route above wins over this catch-all. Serving the console from the
+# same origin as the API it calls means no CORS in production and one public
+# URL (and so one TLS certificate) for the whole service.
+if FRONTEND_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="console")

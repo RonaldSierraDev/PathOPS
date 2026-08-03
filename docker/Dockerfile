@@ -1,3 +1,24 @@
+# --- Stage 1: build the operations console ---
+# Node exists only in this stage; the runtime image below gets the built
+# assets without npm or node_modules coming along with them.
+FROM node:20-slim AS console
+
+WORKDIR /console
+
+# Copy the manifests alone first so `npm ci` is cached against dependency
+# changes rather than re-running on every source edit.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+
+# Empty base URL: the console is served by the same FastAPI process it calls,
+# so requests resolve to relative paths on the same origin. Leaving this unset
+# would bake in the localhost:8000 dev default and break the deployed console.
+ENV VITE_API_URL=""
+RUN npm run build
+
+# --- Stage 2: the API, which also serves those assets ---
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -11,6 +32,10 @@ COPY src/ src/
 # Fargate task that has no GPU and never will.
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir .
+
+# Matches FRONTEND_DIST's default in pathml.api.main, which is relative to
+# this WORKDIR.
+COPY --from=console /console/dist frontend/dist
 
 EXPOSE 8000
 

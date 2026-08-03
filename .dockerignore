@@ -12,3 +12,12 @@ terraform/
 .pytest_cache/
 __pycache__/
 *.pyc
+
+# The console is built inside the image (see docker/Dockerfile); shipping the
+# local node_modules/dist into the build context would be slow and would risk
+# a stale build leaking in.
+frontend/node_modules/
+frontend/dist/
+# Local dev config -- gitignored, so it isn't in a CI checkout, but a local
+# `docker build` would otherwise copy it into the image.
+frontend/.env
