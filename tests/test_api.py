@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timezone
 
 import psycopg2
 import pytest
@@ -180,6 +181,122 @@ def test_recent_predictions_without_database_url_returns_503(monkeypatch):
     assert response.status_code == 503
 
 
+def test_list_models_without_database_url_returns_503(monkeypatch):
+    monkeypatch.setattr(api_main, "DATABASE_URL", None)
+    response = client.get("/models")
+    assert response.status_code == 503
+
+
+def test_drift_status_without_bucket_returns_503(monkeypatch):
+    monkeypatch.setattr(api_main, "S3_ARTIFACTS_BUCKET", None)
+    response = client.get("/monitoring/drift")
+    assert response.status_code == 503
+
+
+class _FakeCloudWatchClient:
+    """Returns datapoints out of order, as CloudWatch itself does."""
+
+    def get_metric_statistics(self, **kwargs):
+        self.call = kwargs
+        return {
+            "Datapoints": [
+                {"Timestamp": datetime(2026, 8, 2, 18, tzinfo=timezone.utc), "Maximum": 0.71},
+                {"Timestamp": datetime(2026, 8, 2, 6, tzinfo=timezone.utc), "Maximum": 0.14},
+            ]
+        }
+
+
+class _FakeDriftS3Client:
+    def __init__(self):
+        self.presigned = []
+
+    def get_paginator(self, operation):
+        assert operation == "list_objects_v2"
+        return self
+
+    def paginate(self, **kwargs):
+        self.listed = kwargs
+        # Two pages, ascending by key, mirroring S3's lexicographic ordering.
+        return iter(
+            [
+                {"Contents": [{"Key": "monitoring/reports/20260801T000000.html",
+                               "LastModified": datetime(2026, 8, 1, tzinfo=timezone.utc)}]},
+                {"Contents": [{"Key": "monitoring/reports/20260802T060000.html",
+                               "LastModified": datetime(2026, 8, 2, 6, tzinfo=timezone.utc)},
+                              {"Key": "monitoring/reports/20260802T180000.html",
+                               "LastModified": datetime(2026, 8, 2, 18, tzinfo=timezone.utc)}]},
+            ]
+        )
+
+    def generate_presigned_url(self, operation, Params, ExpiresIn):
+        self.presigned.append(Params["Key"])
+        return f"https://s3.example/{Params['Key']}?expires={ExpiresIn}"
+
+
+def test_drift_status_returns_latest_share_and_newest_reports_first(monkeypatch):
+    monkeypatch.setattr(api_main, "S3_ARTIFACTS_BUCKET", "my-bucket")
+    monkeypatch.setattr(api_main, "DRIFT_SHARE_THRESHOLD", 0.5)
+    s3 = _FakeDriftS3Client()
+    monkeypatch.setattr(
+        api_main.boto3, "client",
+        lambda service: s3 if service == "s3" else _FakeCloudWatchClient(),
+    )
+
+    body = client.get("/monitoring/drift").json()
+
+    assert body["threshold"] == 0.5
+    # Latest by timestamp, not by CloudWatch's arbitrary datapoint order.
+    assert body["current_share"] == 0.71
+    assert [point["share"] for point in body["history"]] == [0.14, 0.71]
+    assert [report["key"] for report in body["reports"]] == [
+        "monitoring/reports/20260802T180000.html",
+        "monitoring/reports/20260802T060000.html",
+        "monitoring/reports/20260801T000000.html",
+    ]
+    assert body["reports"][0]["url"].startswith("https://s3.example/")
+
+
+def test_drift_status_keeps_only_the_newest_reports_when_limited(monkeypatch):
+    monkeypatch.setattr(api_main, "S3_ARTIFACTS_BUCKET", "my-bucket")
+    s3 = _FakeDriftS3Client()
+    monkeypatch.setattr(
+        api_main.boto3, "client",
+        lambda service: s3 if service == "s3" else _FakeCloudWatchClient(),
+    )
+
+    body = client.get("/monitoring/drift?reports=1").json()
+
+    assert [report["key"] for report in body["reports"]] == [
+        "monitoring/reports/20260802T180000.html"
+    ]
+    # Only the kept key is signed -- paging must not sign every object it sees.
+    assert s3.presigned == ["monitoring/reports/20260802T180000.html"]
+
+
+def test_drift_status_with_no_checks_yet_reports_null_share(monkeypatch):
+    monkeypatch.setattr(api_main, "S3_ARTIFACTS_BUCKET", "my-bucket")
+
+    class _EmptyCloudWatch:
+        def get_metric_statistics(self, **kwargs):
+            return {"Datapoints": []}
+
+    class _EmptyS3(_FakeDriftS3Client):
+        def paginate(self, **kwargs):
+            return iter([{}])
+
+    monkeypatch.setattr(
+        api_main.boto3, "client",
+        lambda service: _EmptyS3() if service == "s3" else _EmptyCloudWatch(),
+    )
+
+    body = client.get("/monitoring/drift").json()
+
+    assert body["current_share"] is None
+    assert body["checked_at"] is None
+    assert body["history"] == []
+    assert body["reports"] == []
+
+
 @pytest.mark.skipif(not _postgres_available(), reason="local Postgres not running (docker compose -f docker/docker-compose.yml up -d)")
 class TestFeedbackAgainstRealPostgres:
     def setup_method(self):
@@ -231,3 +348,21 @@ class TestFeedbackAgainstRealPostgres:
 
         response = client.post("/feedback", json={"prediction_id": 999_999_999, "corrected_label": "tumor"})
         assert response.status_code == 404
+
+    def test_list_models_returns_serving_version_with_prediction_count(self, monkeypatch):
+        monkeypatch.setattr(api_main, "DATABASE_URL", DEFAULT_DSN)
+        monkeypatch.setattr(api_main, "_model_version_id", None)
+        monkeypatch.setattr(api_main, "MODEL_NAME", "test-list-models")
+        monkeypatch.setattr(api_main, "_load_model", lambda: _ConstantLogitModel())
+
+        files = {"file": ("patch.png", _png_bytes(), "image/png")}
+        assert client.post("/predict", files=files).status_code == 200
+
+        response = client.get("/models")
+        assert response.status_code == 200
+        ours = [row for row in response.json() if row["model_name"] == "test-list-models"]
+        assert len(ours) == 1
+        assert ours[0]["serving"] is True
+        assert ours[0]["version"] == api_main.MODEL_VERSION
+        # Shared local Postgres accumulates predictions across runs -- at least the one above.
+        assert ours[0]["prediction_count"] >= 1

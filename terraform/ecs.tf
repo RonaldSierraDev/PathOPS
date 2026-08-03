@@ -39,6 +39,11 @@ resource "aws_ecs_task_definition" "api" {
         { name = "MODEL_S3_URI", value = "s3://${aws_s3_bucket.artifacts.bucket}/models/pcam_resnet18.pt" },
         { name = "MODEL_VERSION", value = "1" },
         { name = "PREDICTION_IMAGES_S3_BUCKET", value = aws_s3_bucket.artifacts.bucket },
+        # Read-only inputs for /monitoring/drift; the threshold is shared with
+        # the alarm so the console draws the line that actually fires.
+        { name = "S3_ARTIFACTS_BUCKET", value = aws_s3_bucket.artifacts.bucket },
+        { name = "CLOUDWATCH_NAMESPACE", value = var.cloudwatch_namespace },
+        { name = "DRIFT_SHARE_THRESHOLD", value = tostring(var.drift_share_threshold) },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.database_url.arn },

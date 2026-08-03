@@ -14,6 +14,18 @@ variable "drift_check_schedule" {
   default = "rate(6 hours)"
 }
 
+variable "cloudwatch_namespace" {
+  type        = string
+  default     = "PathML/Monitoring"
+  description = "Namespace the drift metric is published to, read back by the alarm and the API's /monitoring/drift"
+}
+
+locals {
+  # Written by the monitor Lambda, listed/read back by the API (see
+  # DRIFT_REPORTS_PREFIX in pathml.api.main -- keep the two in step).
+  drift_reports_prefix = "monitoring/reports/"
+}
+
 variable "drift_share_threshold" {
   type        = number
   default     = 0.5
@@ -110,7 +122,7 @@ data "aws_iam_policy_document" "drift_monitor" {
   statement {
     sid       = "WriteDriftReports"
     actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.artifacts.arn}/monitoring/reports/*"]
+    resources = ["${aws_s3_bucket.artifacts.arn}/${local.drift_reports_prefix}*"]
   }
 
   statement {
@@ -158,7 +170,7 @@ resource "aws_lambda_function" "drift_monitor" {
       ECS_CLUSTER          = aws_ecs_cluster.main.name
       ECS_SERVICE          = aws_ecs_service.api.name
       S3_ARTIFACTS_BUCKET  = aws_s3_bucket.artifacts.bucket
-      CLOUDWATCH_NAMESPACE = "PathML/Monitoring"
+      CLOUDWATCH_NAMESPACE = var.cloudwatch_namespace
     }
   }
 
@@ -196,7 +208,7 @@ resource "aws_lambda_permission" "allow_eventbridge" {
 
 resource "aws_cloudwatch_metric_alarm" "drift" {
   alarm_name          = "${var.project_name}-drift-share-high"
-  namespace           = "PathML/Monitoring"
+  namespace           = var.cloudwatch_namespace
   metric_name         = "DriftShare"
   statistic           = "Maximum"
   period              = 21600 # matches the default 6h schedule -- one data point per run
@@ -218,7 +230,7 @@ resource "aws_cloudwatch_log_metric_filter" "api_errors" {
 
   metric_transformation {
     name          = "ApiErrorCount"
-    namespace     = "PathML/Monitoring"
+    namespace     = var.cloudwatch_namespace
     value         = "1"
     default_value = "0"
   }
@@ -226,7 +238,7 @@ resource "aws_cloudwatch_log_metric_filter" "api_errors" {
 
 resource "aws_cloudwatch_metric_alarm" "api_errors" {
   alarm_name          = "${var.project_name}-api-error-rate-high"
-  namespace           = "PathML/Monitoring"
+  namespace           = var.cloudwatch_namespace
   metric_name         = "ApiErrorCount"
   statistic           = "Sum"
   period              = 300
