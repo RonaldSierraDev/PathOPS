@@ -122,14 +122,17 @@ aws s3 cp ../models/pcam_resnet18.pt "s3://$BUCKET/models/pcam_resnet18.pt"
 #    kick off a fresh one now that the image and model both exist
 aws ecs update-service --cluster pathml-cluster --service pathml-api --force-new-deployment
 
-# 5. find the running task's public IP and hit it
+# 5. hit it -- https://ronaldsierra.dev (see terraform/dns.tf) or, if you deployed
+#    under a different domain/no domain, find the running task's public IP directly:
 TASK_ARN=$(aws ecs list-tasks --cluster pathml-cluster --service-name pathml-api --query 'taskArns[0]' --output text)
 ENI_ID=$(aws ecs describe-tasks --cluster pathml-cluster --tasks "$TASK_ARN" --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text)
 PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI_ID" --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
 curl -X POST "http://$PUBLIC_IP:8000/predict" -F "file=@path/to/patch.png"
 ```
 
-**Cost note:** the ECS service runs on Fargate Spot (not on-demand) and RDS defaults to `db.t4g.micro`, both chosen to stay close to the project's own ~$10/mo budget rule -- see the cost comments in `terraform/ecs.tf` and `terraform/rds.tf`. The public IP changes on every redeploy since there's no load balancer (deliberately, to avoid its fixed monthly cost); re-run step 5 after any `force-new-deployment`.
+**Cost note:** the ECS service runs on Fargate Spot (not on-demand) and RDS defaults to `db.t4g.micro`, both chosen to stay close to the project's own ~$10/mo budget rule -- see the cost comments in `terraform/ecs.tf` and `terraform/rds.tf`. The public IP changes on every redeploy since there's no load balancer (deliberately, to avoid its fixed monthly cost); re-run step 5 above if you're hitting the IP directly.
+
+**Custom domain:** `terraform/dns.tf` puts CloudFront (free ACM cert, HTTPS) in front of the task's ephemeral IP. Since there's still no ALB, a small Lambda (`terraform/lambda_src/dns_updater.py`) listens for the ECS task reaching `RUNNING` and upserts a low-TTL Route53 A record (`origin.<domain>`) that CloudFront uses as its origin -- so the public domain stays live across redeploys and Spot interruptions with no manual step. Requires the domain to already be a Route53-hosted zone in the account (`var.domain_name`, default `ronaldsierra.dev`); ACM/CloudFront resources are created via a `provider.aws.us_east_1` alias regardless of `var.aws_region`, since CloudFront certs must live in us-east-1.
 
 **Tearing down:** `terraform destroy` from `terraform/` removes everything (RDS is the piece that keeps billing while idle). To pause without destroying, set `desired_count = 0` (`terraform apply -var desired_count=0`) to stop the Fargate task while keeping RDS/S3/ECR intact.
 
