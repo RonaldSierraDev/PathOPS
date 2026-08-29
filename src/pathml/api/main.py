@@ -23,6 +23,7 @@ from pathml.db.schema import (
     record_model_version,
 )
 from pathml.models.classifier import build_classifier
+from pathml.data.dataset import IMAGENET_MEAN, IMAGENET_STD
 
 app = FastAPI(title="PathML Inference API")
 
@@ -143,6 +144,9 @@ def _preprocess(image: Image.Image) -> torch.Tensor:
     image = image.convert("RGB").resize((96, 96))
     array = np.array(image).transpose(2, 0, 1).copy()
     tensor = torch.from_numpy(array).float() / 255.0
+    mean = IMAGENET_MEAN.view(3, 1, 1)
+    std = IMAGENET_STD.view(3, 1, 1)
+    tensor = (tensor - mean) / std
     return tensor.unsqueeze(0)
 
 

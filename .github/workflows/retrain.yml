@@ -1,12 +1,22 @@
 name: Retrain
 
-# workflow_dispatch is the only trigger, deliberately -- GitHub requires
-# write access to the repo to fire this event, so a forked PR can never
-# invoke it even though the repo is public. That's what makes it safe to
-# run on a self-hosted runner (see terraform/... note: this workflow does
-# NOT use the OIDC deploy role or any GitHub secret; it relies on the AWS
-# CLI credentials already configured locally on the runner machine).
+# Triggers:
+#   - schedule: every Sunday at 02:00 UTC for autonomous weekly retraining
+#   - workflow_dispatch: manual trigger with configurable hyperparameters
+#
+# Both run on the self-hosted runner (pathml-local), which needs to be on and
+# registered for the job to execute. If the machine is off when the schedule
+# fires, GitHub queues the job for up to 35 days and runs it when the runner
+# comes back online.
+#
+# Security note: this workflow does NOT use the OIDC deploy role or any
+# GitHub secret -- it relies on the AWS CLI credentials already configured
+# locally on the runner machine. GitHub requires write access to fire
+# workflow_dispatch; the schedule trigger is also protected because it only
+# runs on the default branch (master), which fork PRs cannot push to.
 on:
+  schedule:
+    - cron: "0 2 * * 0"  # 02:00 UTC every Sunday
   workflow_dispatch:
     inputs:
       epochs:
@@ -49,27 +59,42 @@ jobs:
         id: api
         run: |
           TASK_ARN=$(aws ecs list-tasks --cluster "${{ vars.ECS_CLUSTER }}" --service-name "${{ vars.ECS_SERVICE }}" --query 'taskArns[0]' --output text)
-          ENI_ID=$(aws ecs describe-tasks --cluster "${{ vars.ECS_CLUSTER }}" --tasks "$TASK_ARN" --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text)
-          PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI_ID" --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
-          echo "url=http://$PUBLIC_IP:8000/feedback/export" >> "$GITHUB_OUTPUT"
+          if [ -z "$TASK_ARN" ] || [ "$TASK_ARN" = "None" ]; then
+            echo "No running ECS task found -- skipping feedback blend (training on static PCam only)"
+            echo "url=" >> "$GITHUB_OUTPUT"
+          else
+            ENI_ID=$(aws ecs describe-tasks --cluster "${{ vars.ECS_CLUSTER }}" --tasks "$TASK_ARN" --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text)
+            PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI_ID" --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+            if [ -z "$PUBLIC_IP" ] || [ "$PUBLIC_IP" = "None" ]; then
+              echo "Could not resolve public IP for task $TASK_ARN -- skipping feedback blend"
+              echo "url=" >> "$GITHUB_OUTPUT"
+            else
+              echo "url=http://$PUBLIC_IP:8000/feedback/export" >> "$GITHUB_OUTPUT"
+            fi
+          fi
 
       - name: Retrain, blending in feedback corrections
         env:
-          EPOCHS: ${{ inputs.epochs }}
-          BATCH_SIZE: ${{ inputs.batch_size }}
-          LR: ${{ inputs.lr }}
-          TRACKING_URI: ${{ inputs.tracking_uri }}
+          # inputs.* are only set on workflow_dispatch; fall back to defaults
+          # for the scheduled Sunday run.
+          EPOCHS: ${{ inputs.epochs || '3' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '64' }}
+          LR: ${{ inputs.lr || '0.0001' }}
+          TRACKING_URI: ${{ inputs.tracking_uri || 'sqlite:////home/ronald/projects/PathOPS/mlflow.db' }}
           FEEDBACK_EXPORT_URL: ${{ steps.api.outputs.url }}
           FEEDBACK_IMAGES_S3_BUCKET: ${{ vars.S3_ARTIFACTS_BUCKET }}
         run: |
+          FEEDBACK_ARGS=""
+          if [ -n "$FEEDBACK_EXPORT_URL" ]; then
+            FEEDBACK_ARGS="--feedback-export-url $FEEDBACK_EXPORT_URL --feedback-images-s3-bucket $FEEDBACK_IMAGES_S3_BUCKET"
+          fi
           python -m pathml.training.train \
             --data-dir data/pcam \
             --epochs "$EPOCHS" \
             --batch-size "$BATCH_SIZE" \
             --lr "$LR" \
             --tracking-uri "$TRACKING_URI" \
-            --feedback-export-url "$FEEDBACK_EXPORT_URL" \
-            --feedback-images-s3-bucket "$FEEDBACK_IMAGES_S3_BUCKET"
+            $FEEDBACK_ARGS
 
       - name: Next step (manual)
         run: |

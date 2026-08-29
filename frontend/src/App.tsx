@@ -3,7 +3,6 @@ import { Rail, type View } from "./components/Rail";
 import { OverviewTiles } from "./components/OverviewTiles";
 import { LatencyChart } from "./components/LatencyChart";
 import { PredictionsTable } from "./components/PredictionsTable";
-import { PredictPanel } from "./components/PredictPanel";
 import { PipelineView } from "./components/PipelineView";
 import { RegistryView } from "./components/RegistryView";
 import { DriftView } from "./components/DriftView";
@@ -12,16 +11,11 @@ function ConsoleView() {
   return (
     <>
       <OverviewTiles />
-      <div className="mt-12 flex items-start gap-6">
-        <section className="min-w-0 flex-1">
-          <LatencyChart />
-          <div className="mt-6">
-            <PredictionsTable />
-          </div>
-        </section>
-        <aside className="w-80 shrink-0">
-          <PredictPanel />
-        </aside>
+      <div className="mt-12">
+        <LatencyChart />
+        <div className="mt-6">
+          <PredictionsTable />
+        </div>
       </div>
     </>
   );
@@ -42,7 +36,7 @@ export default function App() {
       <Rail view={view} onNavigate={setView} />
       <main className="mx-auto w-full max-w-6xl px-12 py-10">
         <header className="mb-12">
-          <div className="eyebrow mb-1">PathML Pipeline</div>
+          <div className="eyebrow mb-1">PathOPS</div>
           <h1 className="text-[30px] font-bold leading-tight tracking-tight">
             {VIEWS[view].title}
           </h1>

@@ -12,7 +12,7 @@ const ITEMS: { icon: IconName; label: string; view: View }[] = [
 export function Rail({ view, onNavigate }: { view: View; onNavigate: (v: View) => void }) {
   return (
     <nav className="sticky top-0 flex h-screen w-14 shrink-0 flex-col items-center gap-1 bg-rail py-4">
-      <div className="mb-4 font-mono text-[13px] font-medium text-paper">P/</div>
+      <div className="mb-4 font-mono text-[11px] font-medium text-paper tracking-wide">PathOPS</div>
       {ITEMS.map((item) => {
         const active = item.view === view;
         return (

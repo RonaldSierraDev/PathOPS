@@ -20,6 +20,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 from pathml.db.schema import LABELS, prediction_image_key
+from pathml.data.dataset import IMAGENET_MEAN, IMAGENET_STD
 
 
 class FeedbackDataset(Dataset):
@@ -44,6 +45,9 @@ class FeedbackDataset(Dataset):
             )
             image = Image.open(io.BytesIO(obj["Body"].read())).convert("RGB").resize((96, 96))
             tensor = torch.from_numpy(np.array(image).transpose(2, 0, 1).copy()).float() / 255.0
+            mean = IMAGENET_MEAN.view(3, 1, 1)
+            std = IMAGENET_STD.view(3, 1, 1)
+            tensor = (tensor - mean) / std
             self._examples.append((tensor, LABELS.index(correction["corrected_label"])))
 
     def __len__(self) -> int:

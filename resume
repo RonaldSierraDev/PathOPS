@@ -1,0 +1,6 @@
+\resumeProjectHeading
+  {\textbf{\href{https://github.com/RonaldSierraDev/PathOPS}{PathOPS}} $|$ \emph{Python, PyTorch, FastAPI, AWS (ECS/RDS/Lambda/S3), Terraform, GitHub Actions, MLflow, PostgreSQL}}{}
+  \resumeItemListStart
+    \resumeItem{Built an end-to-end MLOps pipeline that fine-tunes a ResNet18 vision model (PyTorch/timm) on the PatchCamelyon histopathology dataset for tumor-patch classification, evaluated at a sensitivity-floor operating threshold (95.3\% sensitivity, 0.935 AUC) reflecting the asymmetric cost of a missed tumor vs.\ a false alarm, with post-hoc temperature scaling cutting expected calibration error from 0.112 to 0.011.}
+    \resumeItem{Architected the full production lifecycle: MLflow tracking and a versioned registry gate staging-to-production promotion on AUC/sensitivity thresholds; the API deploys to AWS (ECS Fargate, RDS Postgres, S3, ECR) fully reproducible via Terraform; OIDC-authenticated GitHub Actions CI/CD builds, tests, and redeploys on every merge; and a feedback endpoint plus a scheduled Lambda running Evidently drift detection close the loop with CloudWatch/SNS alerting.}
+  \resumeItemListEnd

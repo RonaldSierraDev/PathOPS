@@ -28,7 +28,10 @@ def test_length_and_item_shape(tmp_path):
     image, label = ds[0]
     assert image.shape == (3, 96, 96)
     assert image.dtype == torch.float32
-    assert 0.0 <= image.min() and image.max() <= 1.0
+    # After ImageNet normalization, values are no longer in [0, 1] -- channel
+    # means are subtracted and the result is divided by channel std, so the
+    # typical range is roughly (-2.5, 2.7).  Just verify the tensor is finite.
+    assert torch.isfinite(image).all()
     assert label.item() in (0, 1)
 
 

@@ -6,6 +6,13 @@ import h5py
 import torch
 from torch.utils.data import Dataset
 
+# ImageNet channel statistics -- used to normalize 0-1 float tensors so that
+# pretrained ResNet/ViT backbone weights see inputs in the distribution they
+# were trained on.  Import these from here rather than redeclaring them in
+# training/feedback.py or the inference API so all three stay in sync.
+IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406])  # shape (3,)
+IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225])   # shape (3,)
+
 SPLIT_FILES = {
     "train": ("camelyonpatch_level_2_split_train_x.h5", "camelyonpatch_level_2_split_train_y.h5"),
     "valid": ("camelyonpatch_level_2_split_valid_x.h5", "camelyonpatch_level_2_split_valid_y.h5"),
@@ -58,6 +65,12 @@ class PCamDataset(Dataset):
             image = self.transform(image)
         else:
             image = torch.from_numpy(image.transpose(2, 0, 1).copy()).float() / 255.0
+            # Normalize with ImageNet statistics so the pretrained backbone sees
+            # inputs in the distribution it was trained on.  mean/std are (3,),
+            # broadcast over the (3, H, W) tensor as (3, 1, 1).
+            mean = IMAGENET_MEAN.view(3, 1, 1)
+            std = IMAGENET_STD.view(3, 1, 1)
+            image = (image - mean) / std
 
         return image, torch.tensor(label, dtype=torch.long)
 
